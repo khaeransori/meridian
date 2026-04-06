@@ -86,8 +86,15 @@ function handleEvent(event, result) {
         }
       }
       if (event.message?.usage) {
-        result.usage.inputTokens += event.message.usage.input_tokens || 0;
-        result.usage.outputTokens += event.message.usage.output_tokens || 0;
+        const u = event.message.usage;
+        // Total input = fresh + cache creation + cache read (Claude splits these)
+        const inputTotal = (u.input_tokens || 0)
+          + (u.cache_creation_input_tokens || 0)
+          + (u.cache_read_input_tokens || 0);
+        result.usage.inputTokens += inputTotal;
+        result.usage.cachedInputTokens = (result.usage.cachedInputTokens || 0)
+          + (u.cache_read_input_tokens || 0);
+        result.usage.outputTokens += u.output_tokens || 0;
       }
       break;
     case "user":
@@ -102,10 +109,18 @@ function handleEvent(event, result) {
       }
       break;
     case "result":
-      // Final result event — contains total usage and cost
+      // Final result event — Claude reports total usage. Prefer this over the
+      // accumulated assistant-message totals because it's authoritative.
       if (event.usage) {
-        result.usage.inputTokens = event.usage.input_tokens || result.usage.inputTokens;
-        result.usage.outputTokens = event.usage.output_tokens || result.usage.outputTokens;
+        const u = event.usage;
+        const inputTotal = (u.input_tokens || 0)
+          + (u.cache_creation_input_tokens || 0)
+          + (u.cache_read_input_tokens || 0);
+        if (inputTotal > 0) result.usage.inputTokens = inputTotal;
+        if (u.cache_read_input_tokens != null) {
+          result.usage.cachedInputTokens = u.cache_read_input_tokens;
+        }
+        if (u.output_tokens != null) result.usage.outputTokens = u.output_tokens;
       }
       if (event.total_cost_usd != null) result.costUsd = event.total_cost_usd;
       break;
