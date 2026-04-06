@@ -1008,6 +1008,17 @@ function formatCandidates(candidates) {
 const isTTY = process.stdin.isTTY;
 let cronStarted = false;
 let busy = false;
+let busyAt = 0;
+function isBusyStale() {
+  if (!busy) return false;
+  if (Date.now() - busyAt > STALE_LOCK_MS) {
+    log("cron_warn", `Stale REPL/telegram busy lock detected (${Math.round((Date.now() - busyAt) / 1000)}s old) — force-clearing`);
+    busy = false;
+    busyAt = 0;
+    return false;
+  }
+  return true;
+}
 const _telegramQueue = []; // queued messages received while agent was busy
 const sessionHistory = []; // persists conversation across REPL turns
 const MAX_HISTORY = 20;    // keep last 20 messages (10 exchanges)
@@ -1029,7 +1040,7 @@ function refreshPrompt() {
 }
 
 async function drainTelegramQueue() {
-  while (_telegramQueue.length > 0 && !isManagementBusy() && !isScreeningBusy() && !busy) {
+  while (_telegramQueue.length > 0 && !isManagementBusy() && !isScreeningBusy() && !isBusyStale()) {
     const queued = _telegramQueue.shift();
     await telegramHandler(queued);
   }
@@ -1038,7 +1049,7 @@ async function drainTelegramQueue() {
 async function telegramHandler(msg) {
   const text = msg?.text?.trim();
   if (!text) return;
-  if (isManagementBusy() || isScreeningBusy() || busy) {
+  if (isManagementBusy() || isScreeningBusy() || isBusyStale()) {
     if (_telegramQueue.length < 5) {
       _telegramQueue.push(msg);
       sendMessage(`⏳ Queued (${_telegramQueue.length} in queue): "${text.slice(0, 60)}"`).catch(() => {});
@@ -1109,27 +1120,40 @@ async function telegramHandler(msg) {
   }
 
   busy = true;
+  busyAt = Date.now();
   let liveMessage = null;
+  let timeoutHandle = null;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutHandle = setTimeout(
+      () => reject(new Error(`Telegram handler exceeded ${CYCLE_HARD_TIMEOUT_MS / 1000}s hard timeout`)),
+      CYCLE_HARD_TIMEOUT_MS,
+    );
+  });
   try {
     log("telegram", `Incoming: ${text}`);
     const hasCloseIntent = /\bclose\b|\bsell\b|\bexit\b|\bwithdraw\b/i.test(text);
     const isDeployRequest = !hasCloseIntent && /\bdeploy\b|\bopen position\b|\blp into\b|\badd liquidity\b/i.test(text);
     const agentRole = isDeployRequest ? "SCREENER" : "GENERAL";
     liveMessage = await createLiveMessage("🤖 Live Update", `Request: ${text.slice(0, 240)}`);
-    const { content } = await agentLoop(text, config.llm.maxSteps, sessionHistory, agentRole, null, null, {
-      requireTool: true,
-      interactive: true,
-      onToolStart: async ({ name }) => { await liveMessage?.toolStart(name); },
-      onToolFinish: async ({ name, result, success }) => { await liveMessage?.toolFinish(name, result, success); },
-    });
-    appendHistory(text, content);
-    if (liveMessage) await liveMessage.finalize(stripThink(content));
-    else await sendMessage(stripThink(content));
+    const work = (async () => {
+      const { content } = await agentLoop(text, config.llm.maxSteps, sessionHistory, agentRole, null, null, {
+        requireTool: true,
+        interactive: true,
+        onToolStart: async ({ name }) => { await liveMessage?.toolStart(name); },
+        onToolFinish: async ({ name, result, success }) => { await liveMessage?.toolFinish(name, result, success); },
+      });
+      appendHistory(text, content);
+      if (liveMessage) await liveMessage.finalize(stripThink(content));
+      else await sendMessage(stripThink(content));
+    })();
+    await Promise.race([work, timeoutPromise]);
   } catch (e) {
     if (liveMessage) await liveMessage.fail(e.message).catch(() => {});
     else await sendMessage(`Error: ${e.message}`).catch(() => {});
   } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
     busy = false;
+    busyAt = 0;
     refreshPrompt();
     drainTelegramQueue().catch(() => {});
   }
@@ -1168,11 +1192,11 @@ if (isTTY) {
   }
 
   async function runBusy(fn) {
-    if (busy) { console.log("Agent is busy, please wait..."); rl.prompt(); return; }
-    busy = true; rl.pause();
+    if (isBusyStale()) { console.log("Agent is busy, please wait..."); rl.prompt(); return; }
+    busy = true; busyAt = Date.now(); rl.pause();
     try { await fn(); }
     catch (e) { console.error(`Error: ${e.message}`); }
-    finally { busy = false; rl.setPrompt(buildPrompt()); rl.resume(); rl.prompt(); }
+    finally { busy = false; busyAt = 0; rl.setPrompt(buildPrompt()); rl.resume(); rl.prompt(); }
   }
 
   // ── Startup: show wallet + top candidates ──
