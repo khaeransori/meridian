@@ -23,6 +23,14 @@ log("startup", "DLMM LP Agent starting...");
 log("startup", `Mode: ${process.env.DRY_RUN === "true" ? "DRY RUN" : "LIVE"}`);
 log("startup", `Model: ${process.env.LLM_MODEL || "hermes-3-405b"}`);
 
+// Log resolved provider for each role so it's visible without waiting for the first cycle
+import { resolveProvider, resolveModel } from "./adapters/index.js";
+for (const role of ["MANAGER", "SCREENER", "GENERAL"]) {
+  const provider = resolveProvider(role, config);
+  const model = resolveModel(provider, role, config);
+  log("startup", `Provider [${role}]: ${provider} → ${model}`);
+}
+
 // ─── Startup health checks (fire-and-forget) ───
 
 // OKX API
