@@ -114,6 +114,17 @@ export async function execute({
   proc.stdin.write(promptText);
   proc.stdin.end();
 
+  // Hard kill if claude CLI hangs (e.g. RPC stuck inside an MCP tool call,
+  // Anthropic API slow, network issue). Without this the management cycle
+  // can be locked indefinitely because _managementBusy stays true.
+  const HARD_TIMEOUT_MS = Number(cfg.timeoutMs) > 0 ? Number(cfg.timeoutMs) : 4 * 60 * 1000; // 4 min default
+  const killTimer = setTimeout(() => {
+    log("agent", `[claude-local] Hard timeout (${Math.round(HARD_TIMEOUT_MS / 1000)}s) — killing claude CLI process`);
+    try { proc.kill("SIGTERM"); } catch { /* ignore */ }
+    setTimeout(() => { try { proc.kill("SIGKILL"); } catch { /* ignore */ } }, 5000);
+  }, HARD_TIMEOUT_MS);
+  proc.on("close", () => clearTimeout(killTimer));
+
   // Map Claude's tool_use IDs to our local step counter so tool_result events
   // can be matched back to the started tool. Lets onToolStart fire as soon
   // as Claude requests a tool, and onToolFinish when the result comes back.
