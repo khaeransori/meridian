@@ -10,7 +10,6 @@
 // already-warm imports and RPC connections.
 
 import http from "node:http";
-import { randomUUID } from "node:crypto";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
@@ -59,16 +58,17 @@ function buildMcpServer() {
 /**
  * Start the embedded MCP HTTP server.
  * Returns the chosen { host, port } once listening.
+ *
+ * Stateless mode: a fresh Server + Transport is created per HTTP request.
+ * This is required because each Claude CLI invocation sends an `initialize`
+ * call. Sharing one transport across requests yields "Server already
+ * initialized" errors and causes Claude to hang waiting for a response.
+ *
+ * The per-request setup is cheap (~milliseconds) — Server and Transport
+ * objects are lightweight, the heavy stuff (Solana SDK, Meteora SDK) is
+ * already loaded once at module-init time.
  */
 export async function startMcpHttpServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } = {}) {
-  // Stateful mode — Claude CLI sessions get unique session IDs
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: () => randomUUID(),
-  });
-
-  const mcpServer = buildMcpServer();
-  await mcpServer.connect(transport);
-
   const httpServer = http.createServer(async (req, res) => {
     if (req.url !== "/mcp") {
       res.writeHead(404, { "Content-Type": "text/plain" });
@@ -90,7 +90,21 @@ export async function startMcpHttpServer({ port = DEFAULT_PORT, host = DEFAULT_H
           return;
         }
       }
+
+      // Fresh Server + Transport per request — stateless mode.
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+      });
+      const mcpServer = buildMcpServer();
+
+      // Clean up resources after the response is sent.
+      res.on("close", () => {
+        try { transport.close(); } catch { /* ignore */ }
+        try { mcpServer.close(); } catch { /* ignore */ }
+      });
+
       try {
+        await mcpServer.connect(transport);
         await transport.handleRequest(req, res, parsed);
       } catch (e) {
         log("mcp_http", `Request error: ${e.message}`);
@@ -108,7 +122,7 @@ export async function startMcpHttpServer({ port = DEFAULT_PORT, host = DEFAULT_H
       reject(err);
     });
     httpServer.listen(port, host, () => {
-      log("startup", `MCP HTTP: listening on http://${host}:${port}/mcp`);
+      log("startup", `MCP HTTP: listening on http://${host}:${port}/mcp (stateless)`);
       resolve({ host, port, server: httpServer });
     });
   });
