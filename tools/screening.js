@@ -321,12 +321,14 @@ export async function getTopCandidates({ limit = 10 } = {}) {
     eligible.splice(0, eligible.length, ...filtered);
     if (eligible.length < before) log("dev_blocklist", `Filtered ${before - eligible.length} pool(s) via OKX creator check`);
 
-    // Traxr security score — hard gate against milker pools
+    // Traxr security score — hard gate against milker pools.
+    // Use getPoolById with the actual Meteora DLMM pool address (not getPoolScore
+    // which finds any pool for the mint pair — usually a Raydium AMM).
     if (config.traxrEnabled !== false && config.screening.minTraxrScore != null) {
-      const { getPoolScore: traxrPoolScore } = await import("./traxr.js");
+      const { getPoolById: traxrPoolById } = await import("./traxr.js");
       const minScore = config.screening.minTraxrScore;
       const traxrResults = await Promise.allSettled(
-        eligible.map((p) => traxrPoolScore(p.base?.mint, p.quote?.mint)),
+        eligible.map((p) => traxrPoolById(p.pool)),
       );
       for (let i = 0; i < eligible.length; i++) {
         const r = traxrResults[i];
