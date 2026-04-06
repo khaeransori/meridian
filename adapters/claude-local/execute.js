@@ -6,10 +6,32 @@
 
 import { spawn } from "node:child_process";
 import path from "node:path";
+import os from "node:os";
 import { log } from "../../logger.js";
 import { parseClaudeStreamJson } from "./parse.js";
 
 const MCP_CONFIG_PATH = path.resolve("mcp-server/config.json");
+
+/**
+ * Build a PATH that includes common Claude CLI install locations.
+ * Daemon processes (PM2, systemd) don't inherit interactive shell PATH,
+ * so `~/.local/bin` and `~/.npm-global/bin` are typically missing even
+ * though that's where `claude` is installed.
+ */
+function buildClaudePath(existingPath) {
+  const home = os.homedir();
+  const extras = [
+    path.join(home, ".local/bin"),
+    path.join(home, ".npm-global/bin"),
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin",
+  ];
+  const current = (existingPath || "").split(":").filter(Boolean);
+  const merged = [...new Set([...extras, ...current])];
+  return merged.join(":");
+}
 
 export async function execute({
   systemPrompt,
@@ -48,7 +70,7 @@ export async function execute({
 
   const proc = spawn(command, args, {
     cwd: process.cwd(),
-    env: { ...process.env },
+    env: { ...process.env, PATH: buildClaudePath(process.env.PATH) },
     stdio: ["pipe", "pipe", "pipe"],
   });
 
