@@ -854,34 +854,50 @@ export async function closePosition({ position_address, reason }) {
         minutesOOR = Math.floor((Date.now() - new Date(tracked.out_of_range_since).getTime()) / 60000);
       }
 
-      // Fetch closed PnL from API — authoritative source after withdrawal settles
+      // Fetch closed PnL from API — authoritative source after withdrawal settles.
+      // Retry with backoff because the API can take 10-30s to reflect a fresh
+      // close. Falling back to the pre-close cache is a LAST resort because
+      // the cache holds mid-flight PnL which can be wildly wrong (we once
+      // recorded a phantom -75% loss on what was actually a +1% win).
       let pnlUsd = 0;
       let pnlPct = 0;
       let finalValueUsd = 0;
       let initialUsd = 0;
       let feesUsd = tracked.total_fees_claimed_usd || 0;
-      try {
-        const closedUrl = `https://dlmm.datapi.meteora.ag/positions/${poolAddress}/pnl?user=${wallet.publicKey.toString()}&status=closed&pageSize=50&page=1`;
-        const res = await fetch(closedUrl);
-        if (res.ok) {
-          const data = await res.json();
-          const posEntry = (data.positions || []).find(p => p.positionAddress === position_address);
-          if (posEntry) {
-            pnlUsd        = parseFloat(posEntry.pnlUsd || 0);
-            pnlPct        = parseFloat(posEntry.pnlPctChange || 0);
-            finalValueUsd = parseFloat(posEntry.allTimeWithdrawals?.total?.usd || 0);
-            initialUsd    = parseFloat(posEntry.allTimeDeposits?.total?.usd || 0);
-            feesUsd       = parseFloat(posEntry.allTimeFees?.total?.usd || 0) || feesUsd;
-            log("close", `Closed PnL from API: pnl=${pnlUsd.toFixed(2)} USD (${pnlPct.toFixed(2)}%), withdrawn=${finalValueUsd.toFixed(2)}, deposited=${initialUsd.toFixed(2)}`);
-          } else {
-            log("close_warn", `Position not found in status=closed response — may still be settling`);
+      let closedApiSucceeded = false;
+      const closedUrl = `https://dlmm.datapi.meteora.ag/positions/${poolAddress}/pnl?user=${wallet.publicKey.toString()}&status=closed&pageSize=50&page=1`;
+      const RETRY_DELAYS_MS = [3_000, 5_000, 8_000, 12_000, 15_000]; // ~43s total
+      for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+        try {
+          const res = await fetch(closedUrl, { signal: AbortSignal.timeout(10_000) });
+          if (res.ok) {
+            const data = await res.json();
+            const posEntry = (data.positions || []).find(p => p.positionAddress === position_address);
+            if (posEntry) {
+              pnlUsd        = parseFloat(posEntry.pnlUsd || 0);
+              pnlPct        = parseFloat(posEntry.pnlPctChange || 0);
+              finalValueUsd = parseFloat(posEntry.allTimeWithdrawals?.total?.usd || 0);
+              initialUsd    = parseFloat(posEntry.allTimeDeposits?.total?.usd || 0);
+              feesUsd       = parseFloat(posEntry.allTimeFees?.total?.usd || 0) || feesUsd;
+              closedApiSucceeded = true;
+              log("close", `Closed PnL from API: pnl=${pnlUsd.toFixed(2)} USD (${pnlPct.toFixed(2)}%), withdrawn=${finalValueUsd.toFixed(2)}, deposited=${initialUsd.toFixed(2)} [attempt ${attempt + 1}]`);
+              break;
+            }
           }
+        } catch (e) {
+          log("close_warn", `Closed PnL fetch attempt ${attempt + 1} failed: ${e.message}`);
         }
-      } catch (e) {
-        log("close_warn", `Closed PnL fetch failed: ${e.message}`);
+        if (attempt < RETRY_DELAYS_MS.length) {
+          const delay = RETRY_DELAYS_MS[attempt];
+          log("close", `Closed PnL not yet settled — retrying in ${delay / 1000}s (attempt ${attempt + 2}/${RETRY_DELAYS_MS.length + 1})`);
+          await new Promise(r => setTimeout(r, delay));
+        }
       }
-      // Fallback to pre-close cache snapshot if closed API had no data
-      if (finalValueUsd === 0) {
+
+      // Last resort: fall back to cache. Mark the record as suspicious so
+      // downstream lessons/evolution can ignore or de-weight it.
+      let pnlSourceSuspect = false;
+      if (!closedApiSucceeded) {
         const cachedPos = _positionsCache?.positions?.find(p => p.position === position_address);
         if (cachedPos) {
           pnlUsd        = cachedPos.pnl_true_usd ?? cachedPos.pnl_usd ?? 0;
@@ -889,14 +905,14 @@ export async function closePosition({ position_address, reason }) {
           feesUsd       = (cachedPos.collected_fees_true_usd || 0) + (cachedPos.unclaimed_fees_true_usd || 0);
           initialUsd    = tracked.initial_value_usd || 0;
           if (initialUsd > 0) {
-            // Keep fallback internally consistent using USD-only cached metrics.
             finalValueUsd = Math.max(0, initialUsd + pnlUsd - feesUsd);
             pnlPct = (pnlUsd / initialUsd) * 100;
           } else {
             finalValueUsd = cachedPos.total_value_true_usd ?? cachedPos.total_value_usd ?? 0;
             initialUsd = Math.max(0, finalValueUsd + feesUsd - pnlUsd);
           }
-          log("close_warn", `Using cached pnl fallback because closed API has not settled yet`);
+          pnlSourceSuspect = true;
+          log("close_warn", `Closed PnL API never settled after ${RETRY_DELAYS_MS.length + 1} attempts — using cached pnl fallback (SUSPECT — may be inaccurate)`);
         }
       }
 
@@ -924,6 +940,7 @@ export async function closePosition({ position_address, reason }) {
         minutes_held: minutesHeld,
         close_reason: reason || "agent decision",
         hive_signal: hiveSignal,
+        pnl_source_suspect: pnlSourceSuspect, // true if we fell back to cache
       });
 
       return {

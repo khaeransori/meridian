@@ -311,11 +311,17 @@ export async function recordPerformance(perf) {
 
   data.performance.push(entry);
 
-  // Derive and store a lesson
-  const lesson = await derivLesson(entry);
-  if (lesson) {
-    data.lessons.push(lesson);
-    log("lessons", `New lesson: ${lesson.rule}`);
+  // Derive and store a lesson — but skip if PnL source is suspect
+  // (cache fallback after closed-API failed). Suspect records can have
+  // wildly wrong PnL and would poison the lesson system.
+  if (perf.pnl_source_suspect) {
+    log("lessons_warn", `Skipped lesson derivation for ${perf.pool_name || perf.pool} — PnL source flagged suspect`);
+  } else {
+    const lesson = await derivLesson(entry);
+    if (lesson) {
+      data.lessons.push(lesson);
+      log("lessons", `New lesson: ${lesson.rule}`);
+    }
   }
 
   save(data);
@@ -450,6 +456,7 @@ export function evolveThresholds(perfData, config) {
   const windowMs = (config.darwin?.windowDays ?? 60) * 24 * 60 * 60 * 1000;
   const cutoff = Date.now() - windowMs;
   const recentData = perfData.filter(p => {
+    if (p.pnl_source_suspect) return false; // exclude cache-fallback records — PnL may be wildly wrong
     const ts = new Date(p.recorded_at).getTime();
     return Number.isFinite(ts) && ts >= cutoff;
   });
