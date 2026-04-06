@@ -64,7 +64,7 @@ export async function execute({
   systemPrompt,
   userPrompt,
   sessionHistory = [],
-  tools,                   // unused — Claude CLI gets tools via MCP, not API
+  tools,                   // OpenAI-format tools filtered by role (we use this for --allowedTools)
   agentType,
   model,
   maxTurns,
@@ -80,6 +80,12 @@ export async function execute({
   const extraArgs = Array.isArray(cfg.extraArgs) ? cfg.extraArgs : [];
   const mcpConfigPath = buildMcpConfigPath(config.mcpHttp);
 
+  // Build the MCP-namespaced allow-list for this role so Claude CLI doesn't
+  // defer-load all 47 tools (which adds a ToolSearch round-trip per call).
+  const allowedToolsArg = Array.isArray(tools) && tools.length > 0
+    ? tools.map((t) => `mcp__meridian__${t.function?.name ?? t.name}`).join(",")
+    : null;
+
   // Combine session history + new user message into a single conversational prompt.
   const promptText = serializePrompt(sessionHistory, userPrompt);
 
@@ -92,10 +98,12 @@ export async function execute({
     "--append-system-prompt", systemPrompt,
     "--dangerously-skip-permissions",
     "--max-turns", String(maxTurns),
+    ...(allowedToolsArg ? ["--allowedTools", allowedToolsArg] : []),
     ...extraArgs,
   ];
 
-  log("agent", `[claude-local] Spawning: ${command} --print --model ${model} (max-turns: ${maxTurns})`);
+  const toolCount = Array.isArray(tools) ? tools.length : 0;
+  log("agent", `[claude-local] Spawning: ${command} --print --model ${model} (max-turns: ${maxTurns}, allowed-tools: ${toolCount})`);
 
   const proc = spawn(command, args, {
     cwd: process.cwd(),
