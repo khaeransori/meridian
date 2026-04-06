@@ -122,6 +122,13 @@ export async function execute({
     throw e;
   }
 
+  // Match the openrouter adapter: log the final answer text so it shows
+  // up in PM2 logs / Telegram alongside the tool calls.
+  if (parsed.content) {
+    log("agent", "Final answer reached");
+    log("agent", parsed.content);
+  }
+
   // Tool execution happens via MCP server (HTTP or stdio). The executor's
   // own logs ([tool_name] ✓ ... format) come through automatically when
   // using the embedded HTTP server. We only need adapter-level logging
