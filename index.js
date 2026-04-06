@@ -31,6 +31,18 @@ for (const role of ["MANAGER", "SCREENER", "GENERAL"]) {
   log("startup", `Provider [${role}]: ${provider} → ${model}`);
 }
 
+// Start embedded MCP HTTP server when explicitly enabled in config. This lets
+// the Claude CLI talk to a long-running MCP endpoint instead of spawning a
+// fresh server process per cycle (saves ~2-3s of cold start each time).
+if (config.mcpHttp?.enabled) {
+  import("./mcp-http-server.js").then(({ startMcpHttpServer }) =>
+    startMcpHttpServer({
+      port: config.mcpHttp.port,
+      host: config.mcpHttp.host,
+    }).catch((err) => log("startup_error", `MCP HTTP server failed: ${err.message}`))
+  );
+}
+
 // ─── Startup health checks (fire-and-forget) ───
 
 // OKX API

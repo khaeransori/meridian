@@ -2,15 +2,42 @@
 //
 // Claude Local adapter — shells out to the `claude` CLI in headless mode
 // (--print). Uses the user's Claude Max subscription via `claude login`.
-// Tools are exposed to Claude via the Meridian MCP server (mcp-server/).
+//
+// Tools are exposed via the embedded MCP HTTP server (mcp-http-server.js)
+// when available, otherwise falls back to the stdio MCP server. The HTTP
+// transport eliminates ~2-3s of cold-start overhead per cycle by reusing
+// Meridian's already-loaded modules and RPC connections.
 
 import { spawn } from "node:child_process";
+import { writeFileSync, mkdtempSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { log } from "../../logger.js";
 import { parseClaudeStreamJson } from "./parse.js";
 
-const MCP_CONFIG_PATH = path.resolve("mcp-server/config.json");
+const STDIO_CONFIG_PATH = path.resolve("mcp-server/config.json");
+
+/**
+ * Build an MCP config file pointing at the embedded HTTP server when enabled.
+ * Falls back to the stdio config (mcp-server/index.js spawned per call) when
+ * `mcpHttp.enabled` is false.
+ */
+function buildMcpConfigPath(mcpHttpConfig) {
+  if (!mcpHttpConfig?.enabled) return STDIO_CONFIG_PATH;
+  const dir = mkdtempSync(path.join(os.tmpdir(), "meridian-mcp-"));
+  const filePath = path.join(dir, "mcp-config.json");
+  const url = `http://${mcpHttpConfig.host || "127.0.0.1"}:${mcpHttpConfig.port || 8765}/mcp`;
+  const config = {
+    mcpServers: {
+      meridian: {
+        type: "http",
+        url,
+      },
+    },
+  };
+  writeFileSync(filePath, JSON.stringify(config));
+  return filePath;
+}
 
 /**
  * Build a PATH that includes common Claude CLI install locations.
@@ -51,6 +78,7 @@ export async function execute({
   const cfg = config.claudeLocal || {};
   const command = cfg.command || "claude";
   const extraArgs = Array.isArray(cfg.extraArgs) ? cfg.extraArgs : [];
+  const mcpConfigPath = buildMcpConfigPath(config.mcpHttp);
 
   // Combine session history + new user message into a single conversational prompt.
   const promptText = serializePrompt(sessionHistory, userPrompt);
@@ -59,7 +87,7 @@ export async function execute({
     "--print",
     "--output-format", "stream-json",
     "--verbose", // required by claude CLI when using --print + stream-json
-    "--mcp-config", MCP_CONFIG_PATH,
+    "--mcp-config", mcpConfigPath,
     "--model", model,
     "--append-system-prompt", systemPrompt,
     "--dangerously-skip-permissions",

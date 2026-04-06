@@ -123,6 +123,13 @@ export const config = {
     },
   },
 
+  // ─── Embedded MCP HTTP Server (used by claude-local) ───────────
+  mcpHttp: {
+    enabled: u.mcpHttp?.enabled ?? false, // explicit opt-in
+    port:    u.mcpHttp?.port    ?? 8765,
+    host:    u.mcpHttp?.host    ?? "127.0.0.1",
+  },
+
   // ─── OpenRouter Provider Config ──────────
   openrouter: {
     models: {
