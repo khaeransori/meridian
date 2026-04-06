@@ -182,6 +182,88 @@ const actualBaseFee = baseFactor > 0
 - Per-role models: `managementModel`, `screeningModel`, `generalModel` in user-config.json
 - LM Studio: set `LLM_BASE_URL=http://localhost:1234/v1` and `LLM_API_KEY=lm-studio`
 - `maxOutputTokens` minimum: 2048 (free models may have lower limits causing empty responses)
+- **Recommendation**: use non-thinking models for `managementModel` (e.g. `openai/gpt-4o-mini`, `google/gemini-2.5-flash`, `anthropic/claude-sonnet-4-6`). Thinking models like Nemotron consume the 2048 output budget on reasoning traces before tool calls complete.
+
+---
+
+## LLM Provider Adapters
+
+Meridian supports pluggable LLM providers via the adapter pattern. Each provider lives in `adapters/<name>/execute.js` behind a common interface. `agent.js` is a thin dispatcher that picks an adapter based on `user-config.json` per cycle.
+
+### Available providers
+
+| Provider | Billing | Auth | Use case |
+|----------|---------|------|----------|
+| `openrouter` | Pay-per-use API | `OPENROUTER_API_KEY` env | Default — works without setup |
+| `claude-local` | Subscription | `claude login` (Max plan) | Zero LLM cost via Claude CLI |
+
+### Selecting providers per role
+
+```json
+{
+  "providers": {
+    "default":    "openrouter",
+    "management": "claude-local",
+    "screening":  "openrouter",
+    "general":    "claude-local"
+  },
+  "claudeLocal": {
+    "command": "claude",
+    "models": {
+      "management": "claude-haiku-4-6",
+      "general":    "claude-sonnet-4-6"
+    }
+  }
+}
+```
+
+Resolution order (in `adapters/index.js`):
+1. `providers[role]` (where role is `management`/`screening`/`general`)
+2. `providers.default`
+3. Hardcoded `"openrouter"` fallback
+
+Role mapping: agent code uses `MANAGER`/`SCREENER`/`GENERAL` constants which map to config keys `management`/`screening`/`general`.
+
+### Embedded MCP HTTP Server (mcp-http-server.js)
+
+When `mcpHttp.enabled: true`, Meridian's main process exposes its tools via streamable HTTP transport on `http://127.0.0.1:8765/mcp`. The `claude-local` adapter writes a temporary MCP config pointing at this URL instead of spawning `mcp-server/index.js` per call.
+
+This eliminates ~2-3s of cold-start overhead per cycle (Solana SDK + Meteora SDK module loading) because the MCP server shares Meridian's already-warm imports and RPC connections.
+
+```json
+{
+  "mcpHttp": {
+    "enabled": true,
+    "port": 8765,
+    "host": "127.0.0.1"
+  }
+}
+```
+
+When `mcpHttp.enabled: false` (default), the adapter falls back to spawning `mcp-server/index.js` via stdio per call — slower but zero new processes.
+
+### Standalone MCP Server (mcp-server/)
+
+A separate Node.js subfolder (`mcp-server/`) with its own `package.json` containing the MCP SDK. Used by:
+1. The `claude-local` adapter when `mcpHttp.enabled: false` (stdio fallback)
+2. External Claude CLI invocations: `claude --mcp-config mcp-server/config.json -p "..."`
+
+The standalone server is **stateless** — Claude CLI spawns it on demand, it loads `.env` from the meridian root, reads tool definitions from `../tools/definitions.js`, and delegates execution to `../tools/executor.js`. When Claude exits, the server exits.
+
+### Adapter contract
+
+Every adapter exports an `execute()` function with the same shape — see `docs/plans/2026-04-06-llm-provider-adapters-design.md` for the full contract.
+
+### Backward compatibility
+
+If `providers` is missing from `user-config.json`, all roles default to `openrouter` and use the existing `llm.managementModel`/`screeningModel`/`generalModel` keys. No migration needed for existing installs.
+
+### Adding a new provider
+
+1. Create `adapters/<name>/execute.js` exporting `execute({ ... })` matching the contract
+2. Add a case in `adapters/index.js` `getAdapter()` switch
+3. Add provider config section to `config.js` (e.g. `gemini-local` → `geminiLocal`)
+4. Map provider key to config key in `resolveModel()` if needed
 
 ---
 
@@ -191,7 +273,13 @@ const actualBaseFee = baseFactor > 0
 - `getLessonsForPrompt({ agentType })` — injects relevant lessons into system prompt
 - `evolveThresholds()` — adjusts screening thresholds based on winners vs losers
 - Performance recorded via `recordPerformance()` called from executor.js after `close_position`
-- **Known issue**: `evolveThresholds()` references `maxVolatility` and `minFeeTvlRatio` but config.js uses `minFeeActiveTvlRatio` and has no `maxVolatility` key — the evolution of these keys is a no-op
+- **Lifecycle management** (added in lesson management refactor):
+  - Each lesson has `type` (`specific` | `pattern` | `evolved`), `pattern`, `score`, `expires_at`
+  - `pruneLessons()` runs after every record/add: expire → merge specifics into patterns (at threshold 3) → resolve contradictions by sample_size → evict lowest-scoring if over cap
+  - Configurable via `lessons` section in user-config.json (`maxLessons`, `specificTtlDays`, `patternTtlDays`, `evolvedTtlDays`, `mergeThreshold`)
+  - Pinned lessons never expire; unpinning sets a fresh TTL
+  - `getLessonsForPrompt` filters expired lessons and sorts by computed score
+  - Hive lessons that contradict local patterns are filtered out in `prompt.js` (local always wins)
 
 ---
 
@@ -223,5 +311,6 @@ Not required for normal operation.
 
 ## Known Issues / Tech Debt
 
-- `lessons.js evolveThresholds()` evolves `maxVolatility` + `minFeeTvlRatio` (wrong key names — should be `minFeeActiveTvlRatio`; `maxVolatility` doesn't exist in config at all). The evolution is a no-op for those keys.
+- `lessons.js evolveThresholds()` evolves `minFeeTvlRatio` (wrong key name — should be `minFeeActiveTvlRatio`). The evolution of that key is a no-op. `maxVolatility` evolution now works since the key was added to `config.screening`.
 - `get_wallet_positions` tool (dlmm.js) is in definitions.js but not in MANAGER_TOOLS or SCREENER_TOOLS — only available in GENERAL role.
+- 47 MCP tools causes Claude CLI to defer them — adds a `ToolSearch` round-trip per cycle in `claude-local`. Could be optimized by passing `--allowedTools` per role based on `INTENT_TOOLS` mapping in agent.js.
