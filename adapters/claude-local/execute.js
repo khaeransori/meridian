@@ -122,6 +122,14 @@ export async function execute({
     throw e;
   }
 
+  // Surface structured errors from the CLI's stream-json output (e.g. invalid
+  // model id, auth failure). Without this, exit-code-1 errors look identical
+  // to silent failures and are very hard to debug.
+  if (parsed.error) {
+    log("agent", `[claude-local] Error: ${parsed.error}`);
+    throw new Error(parsed.error);
+  }
+
   // Match the openrouter adapter: log the final answer text so it shows
   // up in PM2 logs / Telegram alongside the tool calls.
   if (parsed.content) {

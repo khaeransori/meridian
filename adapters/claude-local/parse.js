@@ -71,6 +71,18 @@ function handleEvent(event, result) {
       if (event.model) result.model = event.model;
       break;
     case "assistant":
+      // CLI surfaces structured errors as synthetic assistant messages with
+      // event.error set (e.g. invalid model id, auth failure). Capture the
+      // text so the adapter can throw a useful message instead of silently
+      // exiting with code 1.
+      if (event.error || event.message?.model === "<synthetic>") {
+        const errText = event.message?.content
+          ?.filter((b) => b.type === "text")
+          .map((b) => b.text)
+          .join(" ")
+          .trim();
+        result.error = errText || event.error || "Claude CLI returned a synthetic error";
+      }
       // Assistant message — may contain text or tool_use blocks
       if (event.message?.content) {
         for (const block of event.message.content) {
@@ -123,6 +135,11 @@ function handleEvent(event, result) {
         if (u.output_tokens != null) result.usage.outputTokens = u.output_tokens;
       }
       if (event.total_cost_usd != null) result.costUsd = event.total_cost_usd;
+      // Result event flags errors via is_error: true. Capture the result text
+      // so the adapter throws with the actual cause (e.g. "model not found").
+      if (event.is_error && !result.error) {
+        result.error = typeof event.result === "string" ? event.result : "Claude CLI reported an error";
+      }
       break;
     case "error":
       result.error = event.error || event.message || "unknown";
