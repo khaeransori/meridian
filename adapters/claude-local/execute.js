@@ -58,6 +58,7 @@ export async function execute({
   const args = [
     "--print",
     "--output-format", "stream-json",
+    "--verbose", // required by claude CLI when using --print + stream-json
     "--mcp-config", MCP_CONFIG_PATH,
     "--model", model,
     "--append-system-prompt", systemPrompt,
