@@ -333,13 +333,21 @@ export async function getTopCandidates({ limit = 10 } = {}) {
       const minStability = config.screening.minTraxrStability ?? 1;
       for (let i = 0; i < eligible.length; i++) {
         const r = traxrResults[i];
-        if (r.status !== "fulfilled" || !r.value) continue;
+        const pool = eligible[i];
+        if (r.status !== "fulfilled" || !r.value) {
+          log("security", `Traxr: ${pool.name} no data (API unreachable or unknown pool)`);
+          continue;
+        }
         const v = r.value;
-        if (v.disabled || v.error) continue; // soft-fail when API down
-        if (typeof v.score === "number") eligible[i].traxr_score = v.score;
-        if (typeof v.nodes?.stability === "number") eligible[i].traxr_stability = v.nodes.stability;
-        if (typeof v.nodes?.depth === "number") eligible[i].traxr_depth = v.nodes.depth;
-        if (v.impact) eligible[i].traxr_impact = v.impact;
+        if (v.disabled || v.error) {
+          log("security", `Traxr: ${pool.name} ${v.disabled ? "disabled" : "error: " + v.error}`);
+          continue;
+        }
+        if (typeof v.score === "number") pool.traxr_score = v.score;
+        if (typeof v.nodes?.stability === "number") pool.traxr_stability = v.nodes.stability;
+        if (typeof v.nodes?.depth === "number") pool.traxr_depth = v.nodes.depth;
+        if (v.impact) pool.traxr_impact = v.impact;
+        log("security", `Traxr: ${pool.name} score=${pool.traxr_score} stability=${pool.traxr_stability ?? "?"} depth=${pool.traxr_depth ?? "?"}`);
       }
       const traxrBefore = eligible.length;
       eligible.splice(0, eligible.length, ...eligible.filter((p) => {
