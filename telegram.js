@@ -37,6 +37,63 @@ let _polling = false;
 let _liveMessageDepth = 0;
 let _warnedMissingChatId = false;
 let _warnedMissingAllowedUsers = false;
+let _botInfo = null;        // { id, username } populated on startup via getMe
+const REQUIRE_MENTION_IN_GROUPS = (process.env.TELEGRAM_REQUIRE_MENTION ?? "true") !== "false";
+
+async function loadBotInfo() {
+  if (!TOKEN || _botInfo) return;
+  try {
+    const res = await fetch(`${BASE}/getMe`);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data?.ok && data.result?.username) {
+      _botInfo = { id: data.result.id, username: data.result.username };
+      log("telegram", `Identified as @${_botInfo.username}`);
+    }
+  } catch (e) {
+    log("telegram_error", `getMe failed: ${e.message}`);
+  }
+}
+
+/**
+ * For group chats, only respond when the message mentions the bot or
+ * replies to one of the bot's own messages. Private chats always pass.
+ */
+function isAddressedToBot(msg) {
+  const chatType = msg.chat?.type || "unknown";
+  if (chatType === "private") return true;
+  if (!REQUIRE_MENTION_IN_GROUPS) return true;
+  if (!_botInfo) return false; // safer default until we know our identity
+
+  // Reply to one of our own messages counts as addressing the bot
+  if (msg.reply_to_message?.from?.id === _botInfo.id) return true;
+
+  // Explicit @username mention via Telegram entities
+  const text = msg.text || "";
+  const entities = msg.entities || [];
+  const handle = `@${_botInfo.username}`.toLowerCase();
+  for (const ent of entities) {
+    if (ent.type === "mention") {
+      const mention = text.substring(ent.offset, ent.offset + ent.length).toLowerCase();
+      if (mention === handle) return true;
+    }
+    if (ent.type === "text_mention" && ent.user?.id === _botInfo.id) return true;
+  }
+  // Fallback: substring match (handles forwarded text without entities)
+  if (text.toLowerCase().includes(handle)) return true;
+  return false;
+}
+
+/**
+ * Strip the bot mention from the message text so the agent doesn't see
+ * the @bot_username noise. Leaves the rest of the message intact.
+ */
+export function stripBotMention(text) {
+  if (!_botInfo || !text) return text;
+  const handle = `@${_botInfo.username}`;
+  const re = new RegExp(handle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+  return text.replace(re, "").replace(/\s+/g, " ").trim();
+}
 
 // ─── chatId persistence ──────────────────────────────────────────
 function loadChatId() {
@@ -329,6 +386,12 @@ async function poll(onMessage) {
           const msg = update.message;
           if (!msg?.text) continue;
           if (!isAuthorizedIncomingMessage(msg)) continue;
+          if (!isAddressedToBot(msg)) {
+            log("telegram", `Skipping group message — not addressed to bot`);
+            continue;
+          }
+          // Strip @bot_username from text so the agent sees a clean prompt
+          msg.text = stripBotMention(msg.text);
           await onMessage(msg);
         }
         saveOffset(_offset); // persist so restarts don't replay or drop
@@ -345,8 +408,13 @@ async function poll(onMessage) {
 export function startPolling(onMessage) {
   if (!TOKEN) return;
   _polling = true;
-  poll(onMessage); // fire-and-forget
-  log("telegram", `Bot polling started (offset=${_offset})`);
+  // Resolve our own bot identity before polling so mention checks work.
+  // Best-effort — polling continues even if getMe fails (private chats
+  // still work, group chats will be quietly ignored).
+  loadBotInfo().finally(() => {
+    poll(onMessage); // fire-and-forget
+    log("telegram", `Bot polling started (offset=${_offset}, bot=${_botInfo?.username || "unknown"})`);
+  });
 }
 
 export function stopPolling() {
