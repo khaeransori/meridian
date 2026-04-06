@@ -28,14 +28,18 @@ function sanitizeStoredText(text, maxLen = MAX_INSTRUCTION_LENGTH) {
 }
 
 function load() {
+  const defaultState = { positions: {}, recentEvents: [], lastUpdated: null };
   if (!fs.existsSync(STATE_FILE)) {
-    return { positions: {}, recentEvents: [], lastUpdated: null };
+    return defaultState;
   }
   try {
-    return JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
+    // Spread defaults so missing top-level keys are always present —
+    // prevents "Cannot read properties of undefined" crashes when older
+    // state.json files predate a key being added.
+    return { ...defaultState, ...JSON.parse(fs.readFileSync(STATE_FILE, "utf8")) };
   } catch (err) {
     log("state_error", `Failed to read state.json: ${err.message}`);
-    return { positions: {}, lastUpdated: null };
+    return defaultState;
   }
 }
 

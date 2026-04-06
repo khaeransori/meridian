@@ -438,13 +438,20 @@ async function runSafetyChecks(name, args) {
         };
       }
 
-      // Hard cap: max X% of pool TVL
+      // Hard cap: max X% of pool TVL.
+      // active_tvl is in USD, amountY is in SOL — convert via live SOL price
+      // for an apples-to-apples comparison. Without solPrice the cap is a no-op.
       if (args.active_tvl != null && args.active_tvl > 0) {
-        const maxByTvl = args.active_tvl * config.risk.maxPoolExposurePct;
-        if (amountY > maxByTvl) {
-          args.amount_y = parseFloat(maxByTvl.toFixed(2));
-          args.amount_sol = args.amount_y;
-          log("safety", `TVL cap: reduced deploy from ${amountY} to ${args.amount_y} SOL (${(config.risk.maxPoolExposurePct * 100).toFixed(0)}% of ${args.active_tvl} TVL)`);
+        const balance = await getWalletBalances();
+        const solPrice = balance?.sol_price;
+        if (solPrice && solPrice > 0) {
+          const maxByTvlUsd = args.active_tvl * config.risk.maxPoolExposurePct;
+          const maxByTvlSol = maxByTvlUsd / solPrice;
+          if (amountY > maxByTvlSol) {
+            args.amount_y = parseFloat(maxByTvlSol.toFixed(2));
+            args.amount_sol = args.amount_y;
+            log("safety", `TVL cap: reduced deploy from ${amountY} to ${args.amount_y} SOL (${(config.risk.maxPoolExposurePct * 100).toFixed(0)}% of $${args.active_tvl} TVL @ $${solPrice}/SOL)`);
+          }
         }
       }
 

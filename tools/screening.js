@@ -207,6 +207,9 @@ export async function getTopCandidates({ limit = 10 } = {}) {
   const occupiedPools = new Set(positions.map((p) => p.pool));
   const occupiedMints = new Set(positions.map((p) => p.base_mint).filter(Boolean));
 
+  const SOL_MINT = config.tokens?.SOL || "So11111111111111111111111111111111111111112";
+  const solPairsOnly = config.screening.solPairsOnly !== false; // default true
+
   const eligible = pools
     .filter((p) => {
       if (occupiedPools.has(p.pool) || occupiedMints.has(p.base?.mint)) return false;
@@ -216,6 +219,11 @@ export async function getTopCandidates({ limit = 10 } = {}) {
       }
       if (isBaseMintOnCooldown(p.base?.mint)) {
         log("screening", `Filtered cooldown token ${p.base?.symbol} (${p.base?.mint?.slice(0, 8)})`);
+        return false;
+      }
+      // Only deploy SOL-paired pools (we wallet SOL, USDC pools waste cycles)
+      if (solPairsOnly && p.quote?.mint !== SOL_MINT) {
+        log("screening", `Filtered non-SOL pair ${p.name} (quote=${p.quote?.symbol})`);
         return false;
       }
       return true;
@@ -312,6 +320,38 @@ export async function getTopCandidates({ limit = 10 } = {}) {
     });
     eligible.splice(0, eligible.length, ...filtered);
     if (eligible.length < before) log("dev_blocklist", `Filtered ${before - eligible.length} pool(s) via OKX creator check`);
+
+    // Traxr security score — hard gate against milker pools
+    if (config.traxrEnabled !== false && config.screening.minTraxrScore != null) {
+      const { getPoolScore: traxrPoolScore } = await import("./traxr.js");
+      const minScore = config.screening.minTraxrScore;
+      const traxrResults = await Promise.allSettled(
+        eligible.map((p) => traxrPoolScore(p.base?.mint, p.quote?.mint)),
+      );
+      for (let i = 0; i < eligible.length; i++) {
+        const r = traxrResults[i];
+        if (r.status !== "fulfilled" || !r.value) continue;
+        const v = r.value;
+        if (v.disabled || v.error) continue; // soft-fail when API down
+        if (typeof v.score === "number") eligible[i].traxr_score = v.score;
+        if (v.impact) eligible[i].traxr_impact = v.impact;
+      }
+      const traxrBefore = eligible.length;
+      eligible.splice(0, eligible.length, ...eligible.filter((p) => {
+        // Soft-fail: skip filter if score missing
+        if (p.traxr_score == null) return true;
+        if (p.traxr_score < minScore) {
+          log("security", `Traxr filter: dropped ${p.name} — score ${p.traxr_score} < ${minScore}`);
+          return false;
+        }
+        if (p.traxr_impact === "HIGH" || p.traxr_impact === "CRITICAL") {
+          log("security", `Traxr filter: dropped ${p.name} — impact ${p.traxr_impact}`);
+          return false;
+        }
+        return true;
+      }));
+      if (eligible.length < traxrBefore) log("security", `Traxr removed ${traxrBefore - eligible.length} pool(s)`);
+    }
 
     // PVP rival detection
     if (config.screening.avoidPvpSymbols || config.screening.blockPvpSymbols) {

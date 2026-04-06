@@ -102,11 +102,14 @@ function computeExpiresAt(type, lessonsConfig) {
 }
 
 function load() {
+  const defaultData = { lessons: [], performance: [] };
   if (!fs.existsSync(LESSONS_FILE)) {
-    return { lessons: [], performance: [] };
+    return defaultData;
   }
   try {
-    const data = JSON.parse(fs.readFileSync(LESSONS_FILE, "utf8"));
+    // Spread defaults so missing top-level keys (e.g. performance) are always
+    // present — prevents "Cannot read properties of undefined" crashes.
+    const data = { ...defaultData, ...JSON.parse(fs.readFileSync(LESSONS_FILE, "utf8")) };
     // Backfill legacy lessons missing lifecycle fields
     let migrated = false;
     for (const lesson of data.lessons || []) {

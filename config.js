@@ -18,6 +18,9 @@ if (u.llmApiKey)  process.env.LLM_API_KEY       ||= u.llmApiKey;
 if (u.dryRun !== undefined) process.env.DRY_RUN ||= String(u.dryRun);
 
 export const config = {
+  // ─── Third-party security ────────────────
+  traxrEnabled: u.traxrEnabled ?? true,
+
   // ─── Risk Limits ─────────────────────────
   risk: {
     maxPositions:       u.maxPositions       ?? 3,
@@ -51,6 +54,8 @@ export const config = {
     excludeHighSupplyConcentration: u.excludeHighSupplyConcentration ?? true,
     minQuoteOrganic:   u.minQuoteOrganic    ?? 60,
     allowedLaunchpads: u.allowedLaunchpads  ?? [],   // whitelist launchpads, [] = allow all
+    minTraxrScore:     u.minTraxrScore      ?? 75,    // Traxr safety score floor (0-100, soft-fail)
+    solPairsOnly:      u.solPairsOnly       ?? true,  // reject non-SOL quote pools
     avoidPvpSymbols:   u.avoidPvpSymbols    ?? true,  // flag PVP rivals for LLM
     blockPvpSymbols:   u.blockPvpSymbols    ?? false, // hard-filter PVP rivals before LLM
   },
@@ -189,7 +194,7 @@ export const config = {
  *   3.0 SOL wallet → 0.98 SOL deploy
  *   4.0 SOL wallet → 1.33 SOL deploy
  */
-export function computeDeployAmount(walletSol, poolTvl = null) {
+export function computeDeployAmount(walletSol, poolTvl = null, solPrice = null) {
   const reserve  = config.management.gasReserve      ?? 0.2;
   const pct      = config.management.positionSizePct ?? 0.35;
   const floor    = config.management.deployAmountSol;
@@ -197,10 +202,13 @@ export function computeDeployAmount(walletSol, poolTvl = null) {
   const deployable = Math.max(0, walletSol - reserve);
   let dynamic      = deployable * pct;
 
-  // Cap at maxPoolExposurePct of pool TVL to avoid whale risk
-  if (poolTvl != null && poolTvl > 0) {
-    const maxByTvl = poolTvl * config.risk.maxPoolExposurePct;
-    dynamic = Math.min(dynamic, maxByTvl);
+  // Cap at maxPoolExposurePct of pool TVL to avoid whale risk.
+  // poolTvl is in USD, dynamic is in SOL — convert via solPrice for an
+  // apples-to-apples comparison. (Without solPrice the cap is a no-op.)
+  if (poolTvl != null && poolTvl > 0 && solPrice && solPrice > 0) {
+    const maxByTvlUsd = poolTvl * config.risk.maxPoolExposurePct;
+    const maxByTvlSol = maxByTvlUsd / solPrice;
+    dynamic = Math.min(dynamic, maxByTvlSol);
   }
 
   const result = Math.min(ceil, Math.max(floor, dynamic));
