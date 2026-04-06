@@ -330,20 +330,28 @@ export async function getTopCandidates({ limit = 10 } = {}) {
       const traxrResults = await Promise.allSettled(
         eligible.map((p) => traxrPoolById(p.pool)),
       );
+      const minStability = config.screening.minTraxrStability ?? 1;
       for (let i = 0; i < eligible.length; i++) {
         const r = traxrResults[i];
         if (r.status !== "fulfilled" || !r.value) continue;
         const v = r.value;
         if (v.disabled || v.error) continue; // soft-fail when API down
         if (typeof v.score === "number") eligible[i].traxr_score = v.score;
+        if (typeof v.nodes?.stability === "number") eligible[i].traxr_stability = v.nodes.stability;
+        if (typeof v.nodes?.depth === "number") eligible[i].traxr_depth = v.nodes.depth;
         if (v.impact) eligible[i].traxr_impact = v.impact;
       }
       const traxrBefore = eligible.length;
       eligible.splice(0, eligible.length, ...eligible.filter((p) => {
-        // Soft-fail: skip filter if score missing
+        // Soft-fail: skip filter if score missing (Traxr API may not know the pool)
         if (p.traxr_score == null) return true;
         if (p.traxr_score < minScore) {
           log("security", `Traxr filter: dropped ${p.name} — score ${p.traxr_score} < ${minScore}`);
+          return false;
+        }
+        // Stability=0 is the death signal — every losing trade in history had it
+        if (p.traxr_stability != null && p.traxr_stability < minStability) {
+          log("security", `Traxr filter: dropped ${p.name} — stability ${p.traxr_stability} < ${minStability}`);
           return false;
         }
         if (p.traxr_impact === "HIGH" || p.traxr_impact === "CRITICAL") {

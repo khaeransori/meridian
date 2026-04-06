@@ -54,7 +54,8 @@ export const config = {
     excludeHighSupplyConcentration: u.excludeHighSupplyConcentration ?? true,
     minQuoteOrganic:   u.minQuoteOrganic    ?? 60,
     allowedLaunchpads: u.allowedLaunchpads  ?? [],   // whitelist launchpads, [] = allow all
-    minTraxrScore:     u.minTraxrScore      ?? 75,    // Traxr safety score floor (0-100, soft-fail)
+    minTraxrScore:     u.minTraxrScore      ?? 60,    // Traxr safety score floor (0-100, soft-fail). Calibrated against trade history.
+    minTraxrStability: u.minTraxrStability  ?? 1,     // reject pools with stability=0 (the death signal)
     solPairsOnly:      u.solPairsOnly       ?? true,  // reject non-SOL quote pools
     avoidPvpSymbols:   u.avoidPvpSymbols    ?? true,  // flag PVP rivals for LLM
     blockPvpSymbols:   u.blockPvpSymbols    ?? false, // hard-filter PVP rivals before LLM
