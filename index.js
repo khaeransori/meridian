@@ -697,6 +697,7 @@ async function _runScreeningCycleInner({ silent = false } = {}) {
     }
     const candidates = (topCandidates?.candidates || topCandidates?.pools || []).slice(0, 10);
     log("cron", `Got ${candidates.length} candidates`);
+    const earlyFilteredExamples = topCandidates?.filtered_examples || [];
 
     const allCandidates = [];
     for (const pool of candidates) {
@@ -753,8 +754,12 @@ async function _runScreeningCycleInner({ silent = false } = {}) {
       const examples = filteredOut.slice(0, 3)
         .map((entry) => `- ${entry.name}: ${entry.reason}`)
         .join("\n");
-      screenReport = examples
-        ? `No candidates available.\nFiltered examples:\n${examples}`
+      const combined = filteredOut.length > 0 ? filteredOut : earlyFilteredExamples;
+      const combinedExamples = combined.slice(0, 3)
+        .map((entry) => `- ${entry.name}: ${entry.reason}`)
+        .join("\n");
+      screenReport = combinedExamples
+        ? `No candidates available.\nFiltered examples:\n${combinedExamples}`
         : `No candidates available (all filtered by launchpad / holder-quality rules).`;
       return screenReport;
     }
