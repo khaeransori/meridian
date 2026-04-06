@@ -326,8 +326,29 @@ async function poll(onMessage) {
 export function startPolling(onMessage) {
   if (!TOKEN) return;
   _polling = true;
-  poll(onMessage); // fire-and-forget
-  log("telegram", "Bot polling started");
+  // Skip messages sent before this process started so we don't replay
+  // every "All in or nothing!" / old command from when the bot was offline.
+  // Telegram drops queued updates when we ack with offset=-1 first.
+  drainBacklog().then(() => {
+    poll(onMessage); // fire-and-forget
+    log("telegram", "Bot polling started (backlog skipped)");
+  }).catch((e) => {
+    log("telegram_error", `Failed to drain backlog: ${e.message}`);
+    poll(onMessage);
+    log("telegram", "Bot polling started (backlog drain failed)");
+  });
+}
+
+async function drainBacklog() {
+  // Calling getUpdates with offset=-1 returns the most recent update.
+  // We then bump _offset past it so subsequent polls only see new messages.
+  const res = await fetch(`${BASE}/getUpdates?offset=-1&timeout=0`);
+  if (!res.ok) return;
+  const data = await res.json();
+  const last = data.result?.[0];
+  if (last?.update_id != null) {
+    _offset = last.update_id + 1;
+  }
 }
 
 export function stopPolling() {
