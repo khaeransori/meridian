@@ -1264,14 +1264,18 @@ Commands:
         if (poolArg) {
           poolsToStudy = [{ pool: poolArg, name: poolArg }];
         } else {
-          // Fetch top 10 candidates across all eligible pools
-          console.log("\nFetching top pool candidates to study...\n");
-          const { candidates } = await getTopCandidates({ limit: 10 });
-          if (!candidates.length) {
-            console.log("No eligible pools found to study.\n");
+          // For /learn we want to study WIDELY — skip strict deploy-time
+          // filters (Traxr, cooldown, SOL-only, etc.) and just grab raw
+          // top pools from the discovery API. Learning from risky pools is
+          // the whole point.
+          console.log("\nFetching top pools to study (broad filter)...\n");
+          const { discoverPools } = await import("./tools/screening.js");
+          const { pools } = await discoverPools({ page_size: 50 });
+          if (!pools?.length) {
+            console.log("No pools returned from discovery API.\n");
             return;
           }
-          poolsToStudy = candidates.map((c) => ({ pool: c.pool, name: c.name }));
+          poolsToStudy = pools.slice(0, 10).map((p) => ({ pool: p.pool, name: p.name }));
         }
 
         console.log(`\nStudying top LPers across ${poolsToStudy.length} pools...\n`);
