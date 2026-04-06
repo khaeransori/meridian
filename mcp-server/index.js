@@ -7,6 +7,15 @@
 // Tool execution delegates to ../tools/executor.js (the same executor used
 // by the OpenRouter adapter — same safety checks, same state updates).
 
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import dotenv from "dotenv";
+
+// Load .env from the meridian root (parent directory of mcp-server/) so the
+// executor sees WALLET_PRIVATE_KEY, RPC_URL, and other env-driven config.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(__dirname, "..", ".env") });
+
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {

@@ -5,6 +5,7 @@
   "description": "MCP server exposing Meridian's DLMM tools to Claude CLI",
   "main": "index.js",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0"
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "dotenv": "^17.3.1"
   }
 }
