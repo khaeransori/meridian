@@ -4,7 +4,7 @@
 // Each line is a JSON event with a `type` field. We collect content,
 // tool calls, and final usage.
 
-export async function parseClaudeStreamJson(proc) {
+export async function parseClaudeStreamJson(proc, onLiveEvent = null) {
   const result = {
     content: "",
     toolCalls: [],
@@ -33,7 +33,23 @@ export async function parseClaudeStreamJson(proc) {
 
         try {
           const event = JSON.parse(line);
+          const before = result.toolCalls.length;
           handleEvent(event, result);
+          // Fire live callbacks for any new tool calls captured this event.
+          // Lets Telegram liveMessage update progressively while Claude runs.
+          if (onLiveEvent && result.toolCalls.length > before) {
+            const newCalls = result.toolCalls.slice(before);
+            for (const tc of newCalls) {
+              try { onLiveEvent({ kind: "tool_use", tool: tc }); } catch { /* best-effort */ }
+            }
+          }
+          if (onLiveEvent && event.type === "user" && event.message?.content) {
+            for (const block of event.message.content) {
+              if (block.type === "tool_result") {
+                try { onLiveEvent({ kind: "tool_result", id: block.tool_use_id }); } catch { /* best-effort */ }
+              }
+            }
+          }
         } catch {
           // Ignore non-JSON lines (Claude CLI sometimes emits status text)
         }

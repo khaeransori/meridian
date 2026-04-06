@@ -39,6 +39,8 @@ function buildAuthHeaders(method, path, body = "") {
   return headers;
 }
 
+const OKX_TIMEOUT_MS = 8_000;
+
 async function okxRequest(method, path, body = null) {
   const bodyText = body == null ? "" : JSON.stringify(body);
   const headers = hasAuth()
@@ -48,6 +50,7 @@ async function okxRequest(method, path, body = null) {
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers,
+    signal: AbortSignal.timeout(OKX_TIMEOUT_MS),
     ...(body != null ? { body: bodyText } : {}),
   });
   if (!res.ok) throw new Error(`OKX API ${res.status}: ${path}`);

@@ -114,9 +114,30 @@ export async function execute({
   proc.stdin.write(promptText);
   proc.stdin.end();
 
+  // Map Claude's tool_use IDs to our local step counter so tool_result events
+  // can be matched back to the started tool. Lets onToolStart fire as soon
+  // as Claude requests a tool, and onToolFinish when the result comes back.
+  const liveStepById = new Map();
+  let liveStep = 0;
+  const onLiveEvent = async (ev) => {
+    if (ev.kind === "tool_use") {
+      liveStep += 1;
+      const cleanName = (ev.tool.name || "").replace(/^mcp__meridian__/, "");
+      liveStepById.set(ev.tool.id, { name: cleanName, step: liveStep });
+      if (onToolStart) {
+        try { await onToolStart({ name: cleanName, args: ev.tool.args, step: liveStep }); } catch { /* best-effort */ }
+      }
+    } else if (ev.kind === "tool_result") {
+      const meta = liveStepById.get(ev.id);
+      if (meta && onToolFinish) {
+        try { await onToolFinish({ name: meta.name, result: null, success: true, step: meta.step }); } catch { /* best-effort */ }
+      }
+    }
+  };
+
   let parsed;
   try {
-    parsed = await parseClaudeStreamJson(proc);
+    parsed = await parseClaudeStreamJson(proc, onLiveEvent);
   } catch (e) {
     log("agent", `[claude-local] Error: ${e.message}`);
     throw e;
@@ -137,20 +158,15 @@ export async function execute({
     log("agent", parsed.content);
   }
 
-  // Tool execution happens via MCP server (HTTP or stdio). The executor's
-  // own logs ([tool_name] ✓ ... format) come through automatically when
-  // using the embedded HTTP server. We only need adapter-level logging
-  // when using stdio (separate process), which we detect by checking
-  // whether the embedded HTTP server is enabled.
+  // Adapter-level tool logging — only needed in stdio mode where the
+  // executor's own logs go to a separate process. Callbacks already fired
+  // during streaming via onLiveEvent above.
   const inProcessExecution = config.mcpHttp?.enabled === true;
-  for (const tc of parsed.toolCalls) {
-    const cleanName = tc.name.replace(/^mcp__meridian__/, "");
-    if (!inProcessExecution) {
-      // stdio mode: executor logs went to a separate process — surface a summary here
+  if (!inProcessExecution) {
+    for (const tc of parsed.toolCalls) {
+      const cleanName = tc.name.replace(/^mcp__meridian__/, "");
       log("tool", `[${cleanName}] ${summarizeResult(tc.result)}`);
     }
-    if (onToolStart) await onToolStart(cleanName, tc.args);
-    if (onToolFinish) await onToolFinish(cleanName, tc.result);
   }
 
   return {

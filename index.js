@@ -604,9 +604,22 @@ export async function runScreeningCycle({ silent = false } = {}) {
       ? `ACTIVE STRATEGY: ${activeStrategy.name} — LP: ${activeStrategy.lp_strategy} | bins_above: ${activeStrategy.range?.bins_above ?? 0} (FIXED — never change) | deposit: ${activeStrategy.entry?.single_side === "sol" ? "SOL only (amount_y, amount_x=0)" : "dual-sided"} | best for: ${activeStrategy.best_for}`
       : `No active strategy — use default bid_ask, bins_above: 0, SOL only.`;
 
-    // Fetch top candidates, then recon each sequentially with a small delay to avoid 429s
-    const topCandidates = await getTopCandidates({ limit: 10 }).catch(() => null);
+    // Fetch top candidates with a hard timeout — multiple HTTP fetches inside
+    // (OKX, Traxr, PVP, etc.) can hang if any upstream is slow.
+    log("cron", "Fetching top candidates...");
+    const topCandidatesPromise = getTopCandidates({ limit: 10 });
+    const timeoutPromise = new Promise((resolve) =>
+      setTimeout(() => resolve({ __timeout: true }), 60_000)
+    );
+    const topCandidates = await Promise.race([topCandidatesPromise, timeoutPromise])
+      .catch((e) => { log("cron_error", `getTopCandidates failed: ${e.message}`); return null; });
+    if (topCandidates?.__timeout) {
+      log("cron_error", "getTopCandidates timed out after 60s — aborting screening cycle");
+      screenReport = "Screening timed out (upstream API slow). Will retry next cycle.";
+      return screenReport;
+    }
     const candidates = (topCandidates?.candidates || topCandidates?.pools || []).slice(0, 10);
+    log("cron", `Got ${candidates.length} candidates`);
 
     const allCandidates = [];
     for (const pool of candidates) {
