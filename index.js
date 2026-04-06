@@ -831,7 +831,7 @@ Summarize the current portfolio health, total fees earned, and performance of al
     await maybeRunMissedBriefing();
   }, { timezone: 'UTC' });
 
-  // Lightweight 30s PnL poller — updates trailing TP state between management cycles, no LLM
+  // Lightweight 15s PnL poller — updates trailing TP state between management cycles, no LLM
   let _pnlPollBusy = false;
   const pnlPollInterval = setInterval(async () => {
     if (_managementBusy || _screeningBusy || _pnlPollBusy) return;
@@ -866,7 +866,7 @@ Summarize the current portfolio health, total fees earned, and performance of al
     } finally {
       _pnlPollBusy = false;
     }
-  }, 30_000);
+  }, 15_000);
 
   _cronTasks = [mgmtTask, screenTask, healthTask, briefingTask, briefingWatchdog];
   // Store interval ref so stopCronJobs can clear it
