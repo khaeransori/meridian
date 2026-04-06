@@ -103,6 +103,36 @@ export const config = {
     mergeThreshold:   u.lessons?.mergeThreshold   ?? u.mergeThreshold   ?? 3,
   },
 
+  // ─── LLM Provider Routing ────────────────
+  providers: {
+    default:    u.providers?.default    ?? "openrouter",
+    management: u.providers?.management ?? null,  // null = use default
+    screening:  u.providers?.screening  ?? null,
+    general:    u.providers?.general    ?? null,
+  },
+
+  // ─── Claude Local Provider Config ────────
+  claudeLocal: {
+    command:   u.claudeLocal?.command   ?? "claude",
+    extraArgs: u.claudeLocal?.extraArgs ?? [],
+    models: {
+      default:    u.claudeLocal?.models?.default    ?? "claude-sonnet-4-6",
+      management: u.claudeLocal?.models?.management ?? null,
+      screening:  u.claudeLocal?.models?.screening  ?? null,
+      general:    u.claudeLocal?.models?.general    ?? null,
+    },
+  },
+
+  // ─── OpenRouter Provider Config ──────────
+  openrouter: {
+    models: {
+      default:    u.openrouter?.models?.default    ?? null,
+      management: u.openrouter?.models?.management ?? null,
+      screening:  u.openrouter?.models?.screening  ?? null,
+      general:    u.openrouter?.models?.general    ?? null,
+    },
+  },
+
   // ─── Scheduling ─────────────────────────
   schedule: {
     managementIntervalMin:  u.managementIntervalMin  ?? 10,
