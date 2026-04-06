@@ -162,8 +162,40 @@ function buildPrompt() {
 //  CRON DEFINITIONS
 // ═══════════════════════════════════════════
 let _cronTasks = [];
-let _managementBusy = false; // prevents overlapping management cycles
-let _screeningBusy = false;  // prevents overlapping screening cycles
+
+// Cycle locks with stale-lock detection. Track WHEN the flag was set so a
+// hung cycle can be force-cleared by a watchdog. Without this, a stuck
+// claude CLI / RPC / network call pins the flag forever and the bot
+// silently stops doing any work until restart.
+const STALE_LOCK_MS = 6 * 60 * 1000; // 6 min — well above any healthy cycle
+const CYCLE_HARD_TIMEOUT_MS = 5 * 60 * 1000; // 5 min — used by Promise.race wrapper
+
+let _managementBusy = false;
+let _managementBusyAt = 0;
+let _screeningBusy = false;
+let _screeningBusyAt = 0;
+
+function isManagementBusy() {
+  if (!_managementBusy) return false;
+  if (Date.now() - _managementBusyAt > STALE_LOCK_MS) {
+    log("cron_warn", `Stale management lock detected (${Math.round((Date.now() - _managementBusyAt) / 1000)}s old) — force-clearing`);
+    _managementBusy = false;
+    _managementBusyAt = 0;
+    return false;
+  }
+  return true;
+}
+function isScreeningBusy() {
+  if (!_screeningBusy) return false;
+  if (Date.now() - _screeningBusyAt > STALE_LOCK_MS) {
+    log("cron_warn", `Stale screening lock detected (${Math.round((Date.now() - _screeningBusyAt) / 1000)}s old) — force-clearing`);
+    _screeningBusy = false;
+    _screeningBusyAt = 0;
+    return false;
+  }
+  return true;
+}
+
 let _screeningLastTriggered = 0; // epoch ms — prevents management from spamming screening
 let _pollTriggeredAt = 0; // epoch ms — cooldown for poller-triggered management
 const _peakConfirmTimers = new Map();
@@ -272,8 +304,35 @@ function stopCronJobs() {
 }
 
 export async function runManagementCycle({ silent = false } = {}) {
-  if (_managementBusy) return null;
+  if (isManagementBusy()) return null;
   _managementBusy = true;
+  _managementBusyAt = Date.now();
+  // Outer race ensures lock is always cleared even if inner work hangs.
+  // Inner promise still continues in the background after timeout (orphaned)
+  // — that's fine, it can't pin the lock since the outer finally already ran.
+  let timeoutHandle = null;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutHandle = setTimeout(
+      () => reject(new Error(`Management cycle exceeded ${CYCLE_HARD_TIMEOUT_MS / 1000}s hard timeout`)),
+      CYCLE_HARD_TIMEOUT_MS,
+    );
+  });
+  try {
+    return await Promise.race([
+      _runManagementCycleInner({ silent }),
+      timeoutPromise,
+    ]);
+  } catch (e) {
+    log("cron_error", `Management cycle aborted: ${e.message}`);
+    return `Management cycle aborted: ${e.message}`;
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+    _managementBusy = false;
+    _managementBusyAt = 0;
+  }
+}
+
+async function _runManagementCycleInner({ silent = false } = {}) {
   timers.managementLastRun = Date.now();
   log("cron", "Starting management cycle");
   let mgmtReport = null;
@@ -470,7 +529,7 @@ After executing, write a brief one-line result per position.
     log("cron_error", `Management cycle failed: ${error.message}`);
     mgmtReport = `Management cycle failed: ${error.message}`;
   } finally {
-    _managementBusy = false;
+    // Note: _managementBusy is cleared by the outer wrapper, not here.
     if (!silent && telegramEnabled()) {
       if (mgmtReport) {
         if (liveMessage) await liveMessage.finalize(stripThink(mgmtReport)).catch(() => {});
@@ -541,12 +600,36 @@ function formatHivePoolLine(hive) {
 }
 
 export async function runScreeningCycle({ silent = false } = {}) {
-  if (_screeningBusy) {
+  if (isScreeningBusy()) {
     log("cron", "Screening skipped — previous cycle still running");
     return null;
   }
-  _screeningBusy = true; // set immediately — prevents TOCTOU race with concurrent callers
+  _screeningBusy = true;
+  _screeningBusyAt = Date.now();
   _screeningLastTriggered = Date.now();
+  let timeoutHandle = null;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutHandle = setTimeout(
+      () => reject(new Error(`Screening cycle exceeded ${CYCLE_HARD_TIMEOUT_MS / 1000}s hard timeout`)),
+      CYCLE_HARD_TIMEOUT_MS,
+    );
+  });
+  try {
+    return await Promise.race([
+      _runScreeningCycleInner({ silent }),
+      timeoutPromise,
+    ]);
+  } catch (e) {
+    log("cron_error", `Screening cycle aborted: ${e.message}`);
+    return `Screening cycle aborted: ${e.message}`;
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+    _screeningBusy = false;
+    _screeningBusyAt = 0;
+  }
+}
+
+async function _runScreeningCycleInner({ silent = false } = {}) {
 
   // Hard guards — don't even run the agent if preconditions aren't met
   let prePositions, preBalance;
@@ -556,23 +639,17 @@ export async function runScreeningCycle({ silent = false } = {}) {
     [prePositions, preBalance] = await Promise.all([getMyPositions({ force: true }), getWalletBalances()]);
     if (prePositions.total_positions >= config.risk.maxPositions) {
       log("cron", `Screening skipped — max positions reached (${prePositions.total_positions}/${config.risk.maxPositions})`);
-      screenReport = `Screening skipped — max positions reached (${prePositions.total_positions}/${config.risk.maxPositions}).`;
-      _screeningBusy = false;
-      return screenReport;
+      return `Screening skipped — max positions reached (${prePositions.total_positions}/${config.risk.maxPositions}).`;
     }
     const minRequired = config.management.deployAmountSol + config.management.gasReserve;
     const isDryRun = process.env.DRY_RUN === "true";
     if (!isDryRun && preBalance.sol < minRequired) {
       log("cron", `Screening skipped — insufficient SOL (${preBalance.sol.toFixed(3)} < ${minRequired} needed for deploy + gas)`);
-      screenReport = `Screening skipped — insufficient SOL (${preBalance.sol.toFixed(3)} < ${minRequired} needed for deploy + gas).`;
-      _screeningBusy = false;
-      return screenReport;
+      return `Screening skipped — insufficient SOL (${preBalance.sol.toFixed(3)} < ${minRequired} needed for deploy + gas).`;
     }
   } catch (e) {
     log("cron_error", `Screening pre-check failed: ${e.message}`);
-    screenReport = `Screening pre-check failed: ${e.message}`;
-    _screeningBusy = false;
-    return screenReport;
+    return `Screening pre-check failed: ${e.message}`;
   }
   if (!silent && telegramEnabled()) {
     liveMessage = await createLiveMessage("🔍 Screening Cycle", "Scanning candidates...");
@@ -795,7 +872,7 @@ IMPORTANT:
     log("cron_error", `Screening cycle failed: ${error.message}`);
     screenReport = `Screening cycle failed: ${error.message}`;
   } finally {
-    _screeningBusy = false;
+    // Note: _screeningBusy is cleared by the outer wrapper, not here.
     if (!silent && telegramEnabled()) {
       if (screenReport) {
         if (liveMessage) await liveMessage.finalize(stripThink(screenReport)).catch(() => {});
@@ -810,7 +887,7 @@ export function startCronJobs() {
   stopCronJobs(); // stop any running tasks before (re)starting
 
   const mgmtTask = cron.schedule(`*/${Math.max(1, config.schedule.managementIntervalMin)} * * * *`, async () => {
-    if (_managementBusy) return;
+    if (isManagementBusy()) return;
     timers.managementLastRun = Date.now();
     await runManagementCycle();
   });
@@ -818,8 +895,9 @@ export function startCronJobs() {
   const screenTask = cron.schedule(`*/${Math.max(1, config.schedule.screeningIntervalMin)} * * * *`, runScreeningCycle);
 
   const healthTask = cron.schedule(`0 * * * *`, async () => {
-    if (_managementBusy) return;
+    if (isManagementBusy()) return;
     _managementBusy = true;
+    _managementBusyAt = Date.now();
     log("cron", "Starting health check");
     try {
       await agentLoop(`
@@ -831,6 +909,7 @@ Summarize the current portfolio health, total fees earned, and performance of al
       log("cron_error", `Health check failed: ${error.message}`);
     } finally {
       _managementBusy = false;
+      _managementBusyAt = 0;
     }
   });
 
@@ -847,7 +926,7 @@ Summarize the current portfolio health, total fees earned, and performance of al
   // Lightweight 15s PnL poller — updates trailing TP state between management cycles, no LLM
   let _pnlPollBusy = false;
   const pnlPollInterval = setInterval(async () => {
-    if (_managementBusy || _screeningBusy || _pnlPollBusy) return;
+    if (isManagementBusy() || isScreeningBusy() || _pnlPollBusy) return;
     _pnlPollBusy = true;
     try {
       const result = await getMyPositions({ force: true, silent: true }).catch(() => null);
@@ -950,7 +1029,7 @@ function refreshPrompt() {
 }
 
 async function drainTelegramQueue() {
-  while (_telegramQueue.length > 0 && !_managementBusy && !_screeningBusy && !busy) {
+  while (_telegramQueue.length > 0 && !isManagementBusy() && !isScreeningBusy() && !busy) {
     const queued = _telegramQueue.shift();
     await telegramHandler(queued);
   }
@@ -959,7 +1038,7 @@ async function drainTelegramQueue() {
 async function telegramHandler(msg) {
   const text = msg?.text?.trim();
   if (!text) return;
-  if (_managementBusy || _screeningBusy || busy) {
+  if (isManagementBusy() || isScreeningBusy() || busy) {
     if (_telegramQueue.length < 5) {
       _telegramQueue.push(msg);
       sendMessage(`⏳ Queued (${_telegramQueue.length} in queue): "${text.slice(0, 60)}"`).catch(() => {});
