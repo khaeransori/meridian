@@ -34,3 +34,6 @@ discord-signals.json
 
 # Claude Code runtime lock
 .claude/scheduled_tasks.lock
+
+# Telegram polling offset (persists across restarts so messages aren't replayed or dropped)
+.telegram-offset

@@ -5,6 +5,7 @@ import { log } from "./logger.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const USER_CONFIG_PATH = path.join(__dirname, "user-config.json");
+const OFFSET_FILE = path.join(__dirname, ".telegram-offset");
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || null;
 const BASE  = TOKEN ? `https://api.telegram.org/bot${TOKEN}` : null;
@@ -15,8 +16,23 @@ const ALLOWED_USER_IDS = new Set(
     .filter(Boolean)
 );
 
+// ─── offset persistence ──────────────────────────────────────────
+function loadOffset() {
+  try {
+    if (fs.existsSync(OFFSET_FILE)) {
+      const raw = fs.readFileSync(OFFSET_FILE, "utf8").trim();
+      const n = parseInt(raw, 10);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+  } catch { /* ignore */ }
+  return 0;
+}
+function saveOffset(n) {
+  try { fs.writeFileSync(OFFSET_FILE, String(n)); } catch { /* ignore */ }
+}
+
 let chatId   = process.env.TELEGRAM_CHAT_ID || null;
-let _offset  = 0;
+let _offset  = loadOffset();
 let _polling = false;
 let _liveMessageDepth = 0;
 let _warnedMissingChatId = false;
@@ -307,12 +323,15 @@ async function poll(onMessage) {
       );
       if (!res.ok) { await sleep(5000); continue; }
       const data = await res.json();
-      for (const update of data.result || []) {
-        _offset = update.update_id + 1;
-        const msg = update.message;
-        if (!msg?.text) continue;
-        if (!isAuthorizedIncomingMessage(msg)) continue;
-        await onMessage(msg);
+      if (data.result?.length) {
+        for (const update of data.result) {
+          _offset = update.update_id + 1;
+          const msg = update.message;
+          if (!msg?.text) continue;
+          if (!isAuthorizedIncomingMessage(msg)) continue;
+          await onMessage(msg);
+        }
+        saveOffset(_offset); // persist so restarts don't replay or drop
       }
     } catch (e) {
       if (!e.message?.includes("aborted")) {
@@ -326,29 +345,8 @@ async function poll(onMessage) {
 export function startPolling(onMessage) {
   if (!TOKEN) return;
   _polling = true;
-  // Skip messages sent before this process started so we don't replay
-  // every "All in or nothing!" / old command from when the bot was offline.
-  // Telegram drops queued updates when we ack with offset=-1 first.
-  drainBacklog().then(() => {
-    poll(onMessage); // fire-and-forget
-    log("telegram", "Bot polling started (backlog skipped)");
-  }).catch((e) => {
-    log("telegram_error", `Failed to drain backlog: ${e.message}`);
-    poll(onMessage);
-    log("telegram", "Bot polling started (backlog drain failed)");
-  });
-}
-
-async function drainBacklog() {
-  // Calling getUpdates with offset=-1 returns the most recent update.
-  // We then bump _offset past it so subsequent polls only see new messages.
-  const res = await fetch(`${BASE}/getUpdates?offset=-1&timeout=0`);
-  if (!res.ok) return;
-  const data = await res.json();
-  const last = data.result?.[0];
-  if (last?.update_id != null) {
-    _offset = last.update_id + 1;
-  }
+  poll(onMessage); // fire-and-forget
+  log("telegram", `Bot polling started (offset=${_offset})`);
 }
 
 export function stopPolling() {
