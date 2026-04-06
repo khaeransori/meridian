@@ -55,6 +55,38 @@ async function loadBotInfo() {
   }
 }
 
+// Slash commands surfaced in Telegram's "/" autocomplete menu.
+// Telegram caps descriptions at 256 chars and command at 32 chars (lowercase, digits, underscores).
+const BOT_COMMANDS = [
+  { command: "positions",  description: "List open DLMM positions with PnL" },
+  { command: "briefing",   description: "Generate the daily portfolio briefing" },
+  { command: "close",      description: "Close a position by number — /close 1" },
+  { command: "set",        description: "Set a note on a position — /set 1 <note>" },
+];
+
+async function registerSlashCommands() {
+  if (!TOKEN) return;
+  try {
+    const res = await fetch(`${BASE}/setMyCommands`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ commands: BOT_COMMANDS }),
+    });
+    if (!res.ok) {
+      log("telegram_error", `setMyCommands HTTP ${res.status}`);
+      return;
+    }
+    const data = await res.json();
+    if (data?.ok) {
+      log("telegram", `Registered ${BOT_COMMANDS.length} slash commands with Telegram`);
+    } else {
+      log("telegram_error", `setMyCommands failed: ${data?.description || "unknown"}`);
+    }
+  } catch (e) {
+    log("telegram_error", `setMyCommands error: ${e.message}`);
+  }
+}
+
 /**
  * For group chats, only respond when the message mentions the bot or
  * replies to one of the bot's own messages. Private chats always pass.
@@ -411,10 +443,12 @@ export function startPolling(onMessage) {
   // Resolve our own bot identity before polling so mention checks work.
   // Best-effort — polling continues even if getMe fails (private chats
   // still work, group chats will be quietly ignored).
-  loadBotInfo().finally(() => {
-    poll(onMessage); // fire-and-forget
-    log("telegram", `Bot polling started (offset=${_offset}, bot=${_botInfo?.username || "unknown"})`);
-  });
+  loadBotInfo()
+    .then(() => registerSlashCommands())
+    .finally(() => {
+      poll(onMessage); // fire-and-forget
+      log("telegram", `Bot polling started (offset=${_offset}, bot=${_botInfo?.username || "unknown"})`);
+    });
 }
 
 export function stopPolling() {
