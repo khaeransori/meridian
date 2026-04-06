@@ -26,6 +26,20 @@ export async function getAdapter(name) {
   return ADAPTERS[name];
 }
 
+// Map agent role constants → config key suffixes.
+// agentType is "MANAGER" | "SCREENER" | "GENERAL", but config keys use
+// "management" | "screening" | "general" to match the existing
+// managementModel / screeningModel / generalModel naming in user-config.json.
+const ROLE_KEY = {
+  MANAGER:  "management",
+  SCREENER: "screening",
+  GENERAL:  "general",
+};
+
+function roleKey(agentType) {
+  return ROLE_KEY[agentType] || agentType.toLowerCase();
+}
+
 /**
  * Resolve which provider should handle this agent role.
  * Resolution order:
@@ -34,7 +48,7 @@ export async function getAdapter(name) {
  *   3. "openrouter" (hardcoded fallback for backward compat)
  */
 export function resolveProvider(agentType, config) {
-  const role = agentType.toLowerCase();
+  const role = roleKey(agentType);
   const providers = config.providers || {};
   return providers[role] || providers.default || "openrouter";
 }
@@ -48,7 +62,7 @@ export function resolveProvider(agentType, config) {
  *   4. legacy LLM_MODEL env var or hardcoded default
  */
 export function resolveModel(provider, agentType, config) {
-  const role = agentType.toLowerCase();
+  const role = roleKey(agentType);
   const providerKey = provider === "claude-local" ? "claudeLocal" : provider;
   const providerConfig = config[providerKey] || {};
   const models = providerConfig.models || {};
