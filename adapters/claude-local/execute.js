@@ -114,14 +114,18 @@ export async function execute({
     throw e;
   }
 
-  // Surface tool calls to the main log + best-effort callbacks for Telegram.
-  // Claude executes tools via the MCP server (separate process), so these
-  // logs are reconstructed from the parsed stream events.
+  // Tool execution happens via MCP server (HTTP or stdio). The executor's
+  // own logs ([tool_name] ✓ ... format) come through automatically when
+  // using the embedded HTTP server. We only need adapter-level logging
+  // when using stdio (separate process), which we detect by checking
+  // whether the embedded HTTP server is enabled.
+  const inProcessExecution = config.mcpHttp?.enabled === true;
   for (const tc of parsed.toolCalls) {
-    // Strip the mcp__meridian__ prefix that MCP namespaces add
     const cleanName = tc.name.replace(/^mcp__meridian__/, "");
-    const summary = summarizeResult(tc.result);
-    log("tool", `[${cleanName}] ${summary}`);
+    if (!inProcessExecution) {
+      // stdio mode: executor logs went to a separate process — surface a summary here
+      log("tool", `[${cleanName}] ${summarizeResult(tc.result)}`);
+    }
     if (onToolStart) await onToolStart(cleanName, tc.args);
     if (onToolFinish) await onToolFinish(cleanName, tc.result);
   }
