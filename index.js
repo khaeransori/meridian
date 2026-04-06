@@ -421,7 +421,7 @@ export async function runManagementCycle({ silent = false } = {}) {
     });
 
     if (actionPositions.length > 0) {
-      log("cron", `Management: ${actionPositions.length} action(s) needed — invoking LLM [model: ${config.llm.managementModel}]`);
+      log("cron", `Management: ${actionPositions.length} action(s) needed — invoking LLM [provider: ${resolveProvider("MANAGER", config)}, model: ${resolveModel(resolveProvider("MANAGER", config), "MANAGER", config)}]`);
 
       const actionBlocks = actionPositions.map((p) => {
         const act = actionMap.get(p.position);
@@ -448,7 +448,7 @@ RULES:
 
 Execute the required actions. Do NOT re-evaluate CLOSE/CLAIM — rules already applied. Just execute.
 After executing, write a brief one-line result per position.
-      `, config.llm.maxSteps, [], "MANAGER", config.llm.managementModel, 2048, {
+      `, config.llm.maxSteps, [], "MANAGER", null, 2048, {
         onToolStart: async ({ name }) => { await liveMessage?.toolStart(name); },
         onToolFinish: async ({ name, result, success }) => { await liveMessage?.toolFinish(name, result, success); },
       });
@@ -578,7 +578,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
     liveMessage = await createLiveMessage("🔍 Screening Cycle", "Scanning candidates...");
   }
   timers.screeningLastRun = Date.now();
-  log("cron", `Starting screening cycle [model: ${config.llm.screeningModel}]`);
+  log("cron", `Starting screening cycle [provider: ${resolveProvider("SCREENER", config)}, model: ${resolveModel(resolveProvider("SCREENER", config), "SCREENER", config)}]`);
   try {
     // Reuse pre-fetched balance — no extra RPC call needed
     const currentBalance = preBalance;
@@ -772,7 +772,7 @@ STEPS:
 IMPORTANT:
 - Never write "unknown" for OKX. Use real values, omit missing fields, or write exactly "OKX: unavailable".
 - Keep the whole report compact and highly scannable for Telegram.
-      `, config.llm.maxSteps, [], "SCREENER", config.llm.screeningModel, 2048, {
+      `, config.llm.maxSteps, [], "SCREENER", null, 2048, {
         onToolStart: async ({ name }) => { await liveMessage?.toolStart(name); },
         onToolFinish: async ({ name, result, success }) => { await liveMessage?.toolFinish(name, result, success); },
         hiveContext: hiveLessonBlock || null,
@@ -1023,9 +1023,8 @@ async function telegramHandler(msg) {
     const hasCloseIntent = /\bclose\b|\bsell\b|\bexit\b|\bwithdraw\b/i.test(text);
     const isDeployRequest = !hasCloseIntent && /\bdeploy\b|\bopen position\b|\blp into\b|\badd liquidity\b/i.test(text);
     const agentRole = isDeployRequest ? "SCREENER" : "GENERAL";
-    const agentModel = agentRole === "SCREENER" ? config.llm.screeningModel : config.llm.generalModel;
     liveMessage = await createLiveMessage("🤖 Live Update", `Request: ${text.slice(0, 240)}`);
-    const { content } = await agentLoop(text, config.llm.maxSteps, sessionHistory, agentRole, agentModel, null, {
+    const { content } = await agentLoop(text, config.llm.maxSteps, sessionHistory, agentRole, null, null, {
       requireTool: true,
       interactive: true,
       onToolStart: async ({ name }) => { await liveMessage?.toolStart(name); },
@@ -1332,7 +1331,7 @@ Focus on: hold duration, entry/exit timing, what win rates look like, whether sc
     // ── Free-form chat ───────────────────────
     await runBusy(async () => {
       log("user", input);
-      const { content } = await agentLoop(input, config.llm.maxSteps, sessionHistory, "GENERAL", config.llm.generalModel, null, { requireTool: true });
+      const { content } = await agentLoop(input, config.llm.maxSteps, sessionHistory, "GENERAL", null, null, { requireTool: true });
       appendHistory(input, content);
       console.log(`\n${content}\n`);
     });
