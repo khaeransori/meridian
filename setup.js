@@ -14,6 +14,7 @@ const CONFIG_PATH = path.join(__dirname, "user-config.json");
 const ENV_PATH    = path.join(__dirname, ".env");
 
 const DEFAULT_MODEL = "openai/gpt-oss-20b:free";
+const DEFAULT_HIVEMIND_URL = "https://api.agentmeridian.xyz";
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
@@ -346,6 +347,21 @@ const llmModel = await ask(
   e("llmModel", process.env.LLM_MODEL || provider.modelDefault)
 );
 
+// ─── Section 9: HiveMind ──────────────────────────────────────────────────────
+console.log("\n── HiveMind (optional collective intelligence) ───────────────");
+console.log(`HiveMind shares anonymized lessons + deploy outcomes with other agents.`);
+console.log(`URL: ${DEFAULT_HIVEMIND_URL}`);
+console.log(`Leave the API key blank to skip — the feature is disabled without one.\n`);
+
+const hiveMindKeyExisting = e("hiveMindApiKey", "");
+const hiveMindKeyRaw = await ask(
+  "HiveMind API key",
+  hiveMindKeyExisting ? "*** (already set — Enter to keep)" : "(blank to skip)"
+);
+const hiveMindApiKey = hiveMindKeyRaw.startsWith("***") || hiveMindKeyRaw === "(blank to skip)"
+  ? hiveMindKeyExisting
+  : hiveMindKeyRaw;
+
 rl.close();
 
 // ─── Write .env ───────────────────────────────────────────────────────────────
@@ -385,6 +401,8 @@ const userConfig = {
   llmModel,
   ...(llmApiKey ? { llmApiKey } : {}),
   telegramChatId: telegramChatId || "",
+  hiveMindUrl: DEFAULT_HIVEMIND_URL,
+  hiveMindApiKey: hiveMindApiKey || "",
   dryRun,
 };
 
@@ -417,6 +435,7 @@ console.log(`
   Base URL:     ${llmBaseUrl}
 
   Telegram:     ${telegramToken ? "enabled" : "disabled"}
+  HiveMind:     ${hiveMindApiKey ? `enabled (${DEFAULT_HIVEMIND_URL})` : "disabled (no API key)"}
   .env:         ${ENV_PATH}
   Config:       ${CONFIG_PATH}
 

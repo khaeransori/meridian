@@ -18,10 +18,14 @@ import { checkSmartWalletsOnPool } from "./smart-wallets.js";
 import { getTokenNarrative, getTokenInfo } from "./tools/token.js";
 import { queryPoolConsensus, queryLessonConsensus } from "./hive-mind.js";
 import { getWeightsSummary } from "./signal-weights.js";
+import { bootstrapHiveMind, ensureAgentId, startHiveMindBackgroundSync } from "./hivemind.js";
 
 log("startup", "DLMM LP Agent starting...");
 log("startup", `Mode: ${process.env.DRY_RUN === "true" ? "DRY RUN" : "LIVE"}`);
 log("startup", `Model: ${process.env.LLM_MODEL || "hermes-3-405b"}`);
+ensureAgentId();
+bootstrapHiveMind().catch((error) => log("hivemind_warn", `Bootstrap failed: ${error.message}`));
+startHiveMindBackgroundSync();
 
 // Log resolved provider for each role so it's visible without waiting for the first cycle
 import { resolveProvider, resolveModel } from "./adapters/index.js";
@@ -128,7 +132,7 @@ if (hiveMindEnabled()) {
   log("startup", "Hive Mind: SKIPPED (not configured)");
 }
 
-const TP_PCT = config.management.takeProfitFeePct;
+const TP_PCT = config.management.takeProfitPct;
 const DEPLOY = config.management.deployAmountSol;
 
 // ═══════════════════════════════════════════
@@ -414,7 +418,7 @@ async function _runManagementCycleInner({ silent = false } = {}) {
         continue;
       }
       // Rule 2: take profit
-      if (!pnlSuspect && p.pnl_pct != null && p.pnl_pct >= config.management.takeProfitFeePct) {
+      if (!pnlSuspect && p.pnl_pct != null && p.pnl_pct >= config.management.takeProfitPct) {
         actionMap.set(p.position, { action: "CLOSE", rule: 2, reason: "take profit" });
         continue;
       }

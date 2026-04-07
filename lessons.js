@@ -10,6 +10,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { log } from "./logger.js";
+import { getSharedLessonsForPrompt, pushHiveLesson, pushHivePerformanceEvent } from "./hivemind.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const USER_CONFIG_PATH = path.join(__dirname, "user-config.json");
@@ -325,6 +326,9 @@ export async function recordPerformance(perf) {
   }
 
   save(data);
+  if (lesson) {
+    void pushHiveLesson(lesson);
+  }
 
   // Prune lessons
   const { config: cfg } = await import("./config.js");
@@ -367,8 +371,16 @@ export async function recordPerformance(perf) {
     }
   }
 
-  // Fire-and-forget sync to hive mind (if enabled)
+  // Fire-and-forget sync to legacy hive mind (if enabled)
   import("./hive-mind.js").then(m => m.syncToHive()).catch(() => {});
+
+  // New hivemind push (af52813)
+  void pushHivePerformanceEvent({
+    ...entry,
+    base_mint: perf.base_mint || null,
+    fees_earned_sol: perf.fees_earned_sol || 0,
+    eventId: `close:${perf.position}:${entry.recorded_at}`,
+  });
 }
 
 /**
@@ -422,15 +434,45 @@ async function derivLesson(perf) {
 
   const { config } = await import("./config.js");
 
+  const feeYieldPct = perf.initial_value_usd > 0
+    ? ((perf.fees_earned_usd || 0) / perf.initial_value_usd) * 100
+    : 0;
+  const closeReasonText = String(perf.close_reason || "").toLowerCase();
+  const positiveEvidence =
+    feeYieldPct >= 1 ||
+    (perf.fees_earned_usd || 0) >= 3 ||
+    perf.pnl_pct >= 3;
+  const negativeEvidence =
+    perf.pnl_pct <= -5 ||
+    perf.range_efficiency <= 30 ||
+    closeReasonText.includes("out of range") ||
+    closeReasonText.includes("oor") ||
+    closeReasonText.includes("low yield") ||
+    closeReasonText.includes("volume");
+
+  let confidence = 0.35;
+  if (outcome === "good") {
+    confidence = positiveEvidence ? 0.82 : 0.22;
+  } else if (outcome === "bad") {
+    confidence = negativeEvidence ? 0.88 : 0.45;
+  } else if (outcome === "poor") {
+    confidence = negativeEvidence ? 0.68 : 0.32;
+  }
+
   return {
     id: Date.now(),
     rule,
     type: "specific",
     tags,
     outcome,
+    sourceType: "performance",
+    confidence: Math.round(confidence * 100) / 100,
     context,
     pnl_pct: perf.pnl_pct,
+    fees_earned_usd: perf.fees_earned_usd,
+    initial_value_usd: perf.initial_value_usd,
     range_efficiency: perf.range_efficiency,
+    close_reason: perf.close_reason,
     pool: perf.pool,
     pattern: extractPattern(perf),
     score: 1.0,
@@ -739,22 +781,25 @@ export async function addLesson(rule, tags = [], { pinned = false, role = null }
   if (!safeRule) return;
   const { config } = await import("./config.js");
   const data = load();
-  data.lessons.push({
+  const lesson = {
     id: Date.now(),
     rule: safeRule,
     type: "specific",
     tags,
     outcome: "manual",
+    sourceType: tags.includes("self_tune") || tags.includes("config_change") ? "config_change" : "manual",
     pinned: !!pinned,
     role: role || null,
     pattern: null,
     score: 1.0,
     expires_at: pinned ? null : computeExpiresAt("specific", config.lessons),
     created_at: new Date().toISOString(),
-  });
+  };
+  data.lessons.push(lesson);
   save(data);
   pruneLessons(config.lessons);
   log("lessons", `Manual lesson added${pinned ? " [PINNED]" : ""}${role ? ` [${role}]` : ""}: ${safeRule}`);
+  void pushHiveLesson(lesson);
 }
 
 /**
@@ -933,12 +978,17 @@ export function getLessonsForPrompt(opts = {}) {
     : [];
 
   const selected = [...pinned, ...roleMatched, ...recent];
-  if (selected.length === 0) return null;
+  const shared = getSharedLessonsForPrompt({
+    agentType,
+    maxLessons: isAutoCycle ? 4 : 6,
+  });
+  if (selected.length === 0 && !shared) return null;
 
   const sections = [];
   if (pinned.length)      sections.push(`── PINNED (${pinned.length}) ──\n` + fmt(pinned));
   if (roleMatched.length) sections.push(`── ${agentType} (${roleMatched.length}) ──\n` + fmt(roleMatched));
   if (recent.length)      sections.push(`── RECENT (${recent.length}) ──\n` + fmt(recent));
+  if (shared)             sections.push(`── HIVEMIND ──\n${shared}`);
 
   return sections.join("\n\n");
 }
