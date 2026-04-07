@@ -24,8 +24,9 @@ log("startup", "DLMM LP Agent starting...");
 log("startup", `Mode: ${process.env.DRY_RUN === "true" ? "DRY RUN" : "LIVE"}`);
 log("startup", `Model: ${process.env.LLM_MODEL || "hermes-3-405b"}`);
 ensureAgentId();
-bootstrapHiveMind().catch((error) => log("hivemind_warn", `Bootstrap failed: ${error.message}`));
-startHiveMindBackgroundSync();
+// Note: bootstrapHiveMind() + startHiveMindBackgroundSync() are launched
+// later as part of the startup health check block (so timing + status
+// are logged alongside the other dependency checks).
 
 // Log resolved provider for each role so it's visible without waiting for the first cycle
 import { resolveProvider, resolveModel } from "./adapters/index.js";
@@ -112,27 +113,44 @@ if (process.env.HELIUS_API_KEY) {
   log("startup", "Helius: SKIPPED (not configured)");
 }
 
-// Hive Mind (optional)
-import { isEnabled as hiveMindEnabled, getHivePulse } from "./hive-mind.js";
-if (hiveMindEnabled()) {
+// Legacy Hive Mind (optional — hive-mind.js, reads legacyHiveMind* config)
+import { isEnabled as legacyHiveMindEnabled, getHivePulse } from "./hive-mind.js";
+if (legacyHiveMindEnabled()) {
   (async () => {
     const start = Date.now();
     try {
       const pulse = await getHivePulse();
       if (pulse) {
-        log("startup", `Hive Mind: OK (${Date.now() - start}ms, ${pulse.total_agents} agents, ${pulse.overall_win_rate}% win rate)`);
+        log("startup", `Legacy HiveMind: OK (${Date.now() - start}ms, ${pulse.total_agents} agents, ${pulse.overall_win_rate}% win rate)`);
       } else {
         throw new Error("no response");
       }
     } catch (e) {
-      log("startup", `Hive Mind: FAILED — ${e.message} (${Date.now() - start}ms)`);
+      log("startup", `Legacy HiveMind: FAILED — ${e.message} (${Date.now() - start}ms)`);
     }
   })();
 } else {
-  log("startup", "Hive Mind: SKIPPED (not configured)");
+  log("startup", "Legacy HiveMind: SKIPPED (not configured)");
 }
 
-const TP_PCT = config.management.takeProfitPct;
+// HiveMind (new — hivemind.js, reads hiveMind* config)
+if (isHiveMindEnabled()) {
+  (async () => {
+    const start = Date.now();
+    try {
+      const result = await bootstrapHiveMind();
+      if (!result) throw new Error("bootstrap returned null");
+      const agentIdShort = (result.agentId || "").slice(0, 8) || "?";
+      log("startup", `HiveMind: OK (${Date.now() - start}ms, agent ${agentIdShort}, pull=${result.pullMode})`);
+      startHiveMindBackgroundSync();
+    } catch (e) {
+      log("startup", `HiveMind: FAILED — ${e.message} (${Date.now() - start}ms)`);
+    }
+  })();
+} else {
+  log("startup", "HiveMind: SKIPPED (not configured)");
+}
+
 const DEPLOY = config.management.deployAmountSol;
 
 // ═══════════════════════════════════════════

@@ -371,6 +371,32 @@ if (hiveMindApiKey) {
   hiveMindPullMode = pullModeChoice.key;
 }
 
+// ─── Section 9b: Legacy HiveMind ──────────────────────────────────────────────
+// The legacy hive-mind.js can run in parallel against a different server.
+// Leave blank to skip. Uses its own URL + API key so it won't collide with
+// the new HiveMind above.
+console.log("\n── Legacy HiveMind (optional — runs in parallel) ─────────────");
+console.log(`Leave blank to skip. Supply a URL + key to enable the old client too.\n`);
+
+const legacyHiveUrlExisting = e("legacyHiveMindUrl", "");
+const legacyHiveMindUrl = await ask(
+  "Legacy HiveMind URL",
+  legacyHiveUrlExisting || "(blank to skip)"
+);
+const legacyHiveUrl = legacyHiveMindUrl === "(blank to skip)" ? "" : legacyHiveMindUrl;
+
+let legacyHiveApiKey = "";
+if (legacyHiveUrl) {
+  const legacyHiveKeyExisting = e("legacyHiveMindApiKey", "");
+  const legacyHiveKeyRaw = await ask(
+    "Legacy HiveMind API key",
+    legacyHiveKeyExisting ? "*** (already set — Enter to keep)" : "(blank to skip)"
+  );
+  legacyHiveApiKey = legacyHiveKeyRaw.startsWith("***") || legacyHiveKeyRaw === "(blank to skip)"
+    ? legacyHiveKeyExisting
+    : legacyHiveKeyRaw;
+}
+
 rl.close();
 
 // ─── Write .env ───────────────────────────────────────────────────────────────
@@ -413,6 +439,8 @@ const userConfig = {
   hiveMindUrl: DEFAULT_HIVEMIND_URL,
   hiveMindApiKey: hiveMindApiKey || "",
   hiveMindPullMode,
+  legacyHiveMindUrl: legacyHiveUrl || "",
+  legacyHiveMindApiKey: legacyHiveApiKey || "",
   dryRun,
 };
 
@@ -447,6 +475,7 @@ console.log(`
   Telegram:     ${telegramToken ? "enabled" : "disabled"}
   HiveMind:     ${hiveMindApiKey ? `enabled (${DEFAULT_HIVEMIND_URL})` : "disabled (no API key)"}
   Pull mode:    ${hiveMindPullMode}
+  Legacy hive:  ${legacyHiveUrl && legacyHiveApiKey ? `enabled (${legacyHiveUrl})` : "disabled"}
   .env:         ${ENV_PATH}
   Config:       ${CONFIG_PATH}
 

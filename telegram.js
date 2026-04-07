@@ -58,10 +58,24 @@ async function loadBotInfo() {
 // Slash commands surfaced in Telegram's "/" autocomplete menu.
 // Telegram caps descriptions at 256 chars and command at 32 chars (lowercase, digits, underscores).
 const BOT_COMMANDS = [
+  { command: "help",       description: "Show all available commands" },
+  { command: "status",     description: "Wallet + positions snapshot" },
+  { command: "wallet",     description: "Wallet, deploy amount, HiveMind status" },
   { command: "positions",  description: "List open DLMM positions with PnL" },
-  { command: "briefing",   description: "Generate the daily portfolio briefing" },
+  { command: "pool",       description: "Detailed info for one open position — /pool 1" },
   { command: "close",      description: "Close a position by number — /close 1" },
+  { command: "closeall",   description: "Close all open positions" },
   { command: "set",        description: "Set a note on a position — /set 1 <note>" },
+  { command: "config",     description: "Show important runtime config" },
+  { command: "setcfg",     description: "Update persisted config — /setcfg <key> <value>" },
+  { command: "screen",     description: "Refresh deterministic candidate list" },
+  { command: "candidates", description: "Show latest cached candidates" },
+  { command: "deploy",     description: "Deploy candidate by cached index — /deploy 1" },
+  { command: "briefing",   description: "Generate the daily portfolio briefing" },
+  { command: "hive",       description: "HiveMind sync status — /hive pull to fetch now" },
+  { command: "pause",      description: "Stop cron cycles" },
+  { command: "resume",     description: "Start cron cycles again" },
+  { command: "stop",       description: "Shut down agent" },
 ];
 
 async function registerSlashCommands() {

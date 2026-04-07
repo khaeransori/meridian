@@ -222,12 +222,24 @@ const toolMap = {
       log("config", `update_config: config.${section}.${field} ${before} → ${val} (verify: ${config[section][field]})`);
     }
 
-    // Persist to user-config.json
+    // Persist to user-config.json — write under the canonical flat key
+    // (the leaf of the CONFIG_MAP path tuple), NOT under the alias the LLM
+    // supplied. Otherwise aliases like takeProfitFeePct → takeProfitPct
+    // would create a second stale entry in user-config.json that config.js
+    // fallback logic might still read on restart.
     let userConfig = {};
     if (fs.existsSync(USER_CONFIG_PATH)) {
       try { userConfig = JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8")); } catch { /**/ }
     }
-    Object.assign(userConfig, applied);
+    for (const [aliasKey, val] of Object.entries(applied)) {
+      const [, field] = CONFIG_MAP[aliasKey];
+      userConfig[field] = val;
+      // If the LLM supplied a legacy alias different from the canonical
+      // field, drop the stale alias entry so it can't mask the new value.
+      if (aliasKey !== field && userConfig[aliasKey] !== undefined) {
+        delete userConfig[aliasKey];
+      }
+    }
     userConfig._lastAgentTune = new Date().toISOString();
     fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(userConfig, null, 2));
 

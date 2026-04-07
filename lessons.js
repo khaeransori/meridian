@@ -315,10 +315,11 @@ export async function recordPerformance(perf) {
   // Derive and store a lesson — but skip if PnL source is suspect
   // (cache fallback after closed-API failed). Suspect records can have
   // wildly wrong PnL and would poison the lesson system.
+  let lesson = null;
   if (perf.pnl_source_suspect) {
     log("lessons_warn", `Skipped lesson derivation for ${perf.pool_name || perf.pool} — PnL source flagged suspect`);
   } else {
-    const lesson = await derivLesson(entry);
+    lesson = await derivLesson(entry);
     if (lesson) {
       data.lessons.push(lesson);
       log("lessons", `New lesson: ${lesson.rule}`);
@@ -415,22 +416,28 @@ async function derivLesson(perf) {
 
   let rule = "";
 
-  if (outcome === "good" || outcome === "bad") {
-    if (perf.range_efficiency < 30 && outcome === "bad") {
+  if (outcome === "good" || outcome === "bad" || outcome === "poor") {
+    if (perf.range_efficiency < 30 && (outcome === "bad" || outcome === "poor")) {
+      // Mild loss or big loss both caused by range drift — same lesson, different confidence.
       rule = `AVOID: ${perf.pool_name}-type pools (volatility=${perf.volatility}, bin_step=${perf.bin_step}) with strategy="${perf.strategy}" — went OOR ${100 - perf.range_efficiency}% of the time. Consider wider bin_range or bid_ask strategy.`;
       tags.push("oor", perf.strategy, `volatility_${Math.round(perf.volatility)}`);
     } else if (perf.range_efficiency > 80 && outcome === "good") {
       rule = `PREFER: ${perf.pool_name}-type pools (volatility=${perf.volatility}, bin_step=${perf.bin_step}) with strategy="${perf.strategy}" — ${perf.range_efficiency}% in-range efficiency, PnL +${perf.pnl_pct}%.`;
       tags.push("efficient", perf.strategy);
-    } else if (outcome === "bad" && perf.close_reason?.includes("volume")) {
+    } else if ((outcome === "bad" || outcome === "poor") && perf.close_reason?.includes("volume")) {
       rule = `AVOID: Pools with fee_tvl_ratio=${perf.fee_tvl_ratio} that showed volume collapse — fees evaporated quickly. Minimum sustained volume check needed before deploying.`;
       tags.push("volume_collapse");
     } else if (outcome === "good") {
       rule = `WORKED: ${context} → PnL +${perf.pnl_pct}%, range efficiency ${perf.range_efficiency}%.`;
       tags.push("worked");
-    } else {
+    } else if (outcome === "bad") {
       rule = `FAILED: ${context} → PnL ${perf.pnl_pct}%, range efficiency ${perf.range_efficiency}%. Reason: ${perf.close_reason}.`;
       tags.push("failed");
+    } else {
+      // "poor" — mild loss (−5% to 0%) with no obvious range/volume cause.
+      // Still a signal worth remembering, at lower confidence than "bad".
+      rule = `FADED: ${context} → PnL ${perf.pnl_pct}%, range efficiency ${perf.range_efficiency}%. Reason: ${perf.close_reason}.`;
+      tags.push("faded");
     }
   }
 
@@ -457,6 +464,8 @@ async function derivLesson(perf) {
   } else if (outcome === "bad") {
     confidence = negativeEvidence ? 0.88 : 0.45;
   } else if (outcome === "poor") {
+    // Mild losses: lower confidence than "bad" since the signal is weaker,
+    // but still trustworthy when there's clear evidence (OOR, volume collapse).
     confidence = negativeEvidence ? 0.68 : 0.32;
   }
 
