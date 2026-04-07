@@ -227,11 +227,33 @@ const TRAILING_PEAK_CONFIRM_TOLERANCE = 0.85;
 const TRAILING_DROP_CONFIRM_DELAY_MS = 15_000;
 const TRAILING_DROP_CONFIRM_TOLERANCE_PCT = 1.0;
 
-/** Strip <think>...</think> reasoning blocks that some models leak into output */
-function stripThink(text) {
+/**
+ * Sanitize LLM output for plain-text Telegram delivery.
+ * - Strips <think>...</think> reasoning blocks that some models leak
+ * - Strips markdown emphasis markers (***, **, *, _) since we send as plain
+ *   text and Telegram would otherwise show the literal asterisks/underscores
+ * - Strips inline code backticks (keeps the content)
+ * - Leaves URLs, punctuation, and line breaks untouched
+ */
+function sanitizeForTelegram(text) {
   if (!text) return text;
-  return text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+  return String(text)
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    // bold-italic ***text***
+    .replace(/\*\*\*(.+?)\*\*\*/g, "$1")
+    // bold **text**
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    // italic *text* (only when surrounded by non-word chars to avoid eating `a*b`)
+    .replace(/(?<!\w)\*(.+?)\*(?!\w)/g, "$1")
+    // italic _text_ (same guard to avoid eating snake_case_names)
+    .replace(/(?<!\w)_(.+?)_(?!\w)/g, "$1")
+    // inline code `text`
+    .replace(/`([^`]+)`/g, "$1")
+    .trim();
 }
+
+// Back-compat alias — older call sites still use stripThink
+const stripThink = sanitizeForTelegram;
 
 function sanitizeUntrustedPromptText(text, maxLen = 500) {
   if (!text) return null;
@@ -1142,15 +1164,15 @@ function formatHelpText() {
     "/status — wallet + positions snapshot",
     "/wallet — wallet, deploy amount, HiveMind status",
     "/positions — list open positions",
-    "/pool <n> — detailed info for one open position",
-    "/close <n> — close one position by index",
+    "/pool [n] — detailed info for one open position",
+    "/close [n] — close one position by index",
     "/closeall — close all open positions",
-    "/set <n> <note> — set note/instruction on position",
+    "/set [n] [note] — set note/instruction on position",
     "/config — show important runtime config",
-    "/setcfg <key> <value> — update persisted config",
+    "/setcfg [key] [value] — update persisted config",
     "/screen — refresh deterministic candidate list",
     "/candidates — show latest cached candidates",
-    "/deploy <n> — deploy candidate by cached index",
+    "/deploy [n] — deploy candidate by cached index",
     "/briefing — morning briefing",
     "/hive — HiveMind sync status",
     "/hive pull — manual HiveMind pull now",
@@ -1287,7 +1309,7 @@ async function telegramHandler(msg) {
         const oor = !p.in_range ? " ⚠️OOR" : "";
         return `${i + 1}. ${p.pair} | ${cur}${p.total_value_usd} | PnL: ${pnl} | fees: ${cur}${p.unclaimed_fees_usd} | ${age}${oor}`;
       });
-      await sendMessage(`📊 Open Positions (${total_positions}):\n\n${lines.join("\n")}\n\n/close <n> to close | /set <n> <note> to set instruction`);
+      await sendMessage(`📊 Open Positions (${total_positions}):\n\n${lines.join("\n")}\n\n/close [n] to close | /set [n] [note] to set instruction`);
     } catch (e) { await sendMessage(`Error: ${e.message}`).catch(() => {}); }
     return;
   }
