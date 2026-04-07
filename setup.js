@@ -362,6 +362,15 @@ const hiveMindApiKey = hiveMindKeyRaw.startsWith("***") || hiveMindKeyRaw === "(
   ? hiveMindKeyExisting
   : hiveMindKeyRaw;
 
+let hiveMindPullMode = e("hiveMindPullMode", "auto");
+if (hiveMindApiKey) {
+  const pullModeChoice = await askChoice("HiveMind pull mode:", [
+    { label: "auto — pull shared lessons/presets automatically",    key: "auto"   },
+    { label: "manual — only pull when explicitly requested",        key: "manual" },
+  ]);
+  hiveMindPullMode = pullModeChoice.key;
+}
+
 rl.close();
 
 // ─── Write .env ───────────────────────────────────────────────────────────────
@@ -403,6 +412,7 @@ const userConfig = {
   telegramChatId: telegramChatId || "",
   hiveMindUrl: DEFAULT_HIVEMIND_URL,
   hiveMindApiKey: hiveMindApiKey || "",
+  hiveMindPullMode,
   dryRun,
 };
 
@@ -436,6 +446,7 @@ console.log(`
 
   Telegram:     ${telegramToken ? "enabled" : "disabled"}
   HiveMind:     ${hiveMindApiKey ? `enabled (${DEFAULT_HIVEMIND_URL})` : "disabled (no API key)"}
+  Pull mode:    ${hiveMindPullMode}
   .env:         ${ENV_PATH}
   Config:       ${CONFIG_PATH}
 

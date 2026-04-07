@@ -75,6 +75,15 @@ function getApiKey() {
   return sanitizeText(config.hiveMind?.apiKey || "", 300) || "";
 }
 
+function getPullMode() {
+  const mode = sanitizeText(config.hiveMind?.pullMode || "auto", 20) || "auto";
+  return mode === "manual" ? "manual" : "auto";
+}
+
+export function getHiveMindPullMode() {
+  return getPullMode();
+}
+
 export function isHiveMindEnabled() {
   return !!(getBaseUrl() && getApiKey());
 }
@@ -218,22 +227,22 @@ export async function pullHiveMindPresets() {
 export async function bootstrapHiveMind() {
   if (!isHiveMindEnabled()) return null;
   ensureAgentId();
-  await Promise.allSettled([
-    registerHiveMindAgent({ reason: "startup" }),
-    pullHiveMindLessons(),
-    pullHiveMindPresets(),
-  ]);
-  return { enabled: true, agentId: getAgentId() };
+  const tasks = [registerHiveMindAgent({ reason: "startup" })];
+  if (getPullMode() === "auto") {
+    tasks.push(pullHiveMindLessons(), pullHiveMindPresets());
+  }
+  await Promise.allSettled(tasks);
+  return { enabled: true, agentId: getAgentId(), pullMode: getPullMode() };
 }
 
 export function startHiveMindBackgroundSync() {
   if (!isHiveMindEnabled() || _heartbeatTimer) return null;
   _heartbeatTimer = setInterval(() => {
-    Promise.allSettled([
-      registerHiveMindAgent({ reason: "heartbeat" }),
-      pullHiveMindLessons(),
-      pullHiveMindPresets(),
-    ]).catch(() => null);
+    const tasks = [registerHiveMindAgent({ reason: "heartbeat" })];
+    if (getPullMode() === "auto") {
+      tasks.push(pullHiveMindLessons(), pullHiveMindPresets());
+    }
+    Promise.allSettled(tasks).catch(() => null);
   }, HEARTBEAT_INTERVAL_MS);
   return _heartbeatTimer;
 }
