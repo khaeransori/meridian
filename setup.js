@@ -88,40 +88,40 @@ const PRESETS = {
     label:                 "Degen",
     timeframe:             "30m",
     minOrganic:            60,
-    minHolders:            200,
+    minHolders:            250,
     maxMcap:               5_000_000,
-    takeProfitFeePct:      10,
-    stopLossPct:           -25,
+    takeProfitPct:         8,
+    stopLossPct:           -35,
     outOfRangeWaitMinutes: 15,
     managementIntervalMin: 5,
     screeningIntervalMin:  15,
-    description: "30m timeframe, pumping tokens allowed, fast cycles. High risk/reward.",
+    description: "Fast cycles, looser filters, quicker exits, higher risk/reward.",
   },
   moderate: {
     label:                 "Moderate",
-    timeframe:             "4h",
+    timeframe:             "30m",
     minOrganic:            65,
     minHolders:            500,
     maxMcap:               10_000_000,
-    takeProfitFeePct:      5,
-    stopLossPct:           -15,
+    takeProfitPct:         5,
+    stopLossPct:           -40,
     outOfRangeWaitMinutes: 30,
     managementIntervalMin: 10,
     screeningIntervalMin:  30,
-    description: "4h timeframe, balanced risk/reward. Recommended for most users.",
+    description: "Balanced default for most users.",
   },
   safe: {
     label:                 "Safe",
-    timeframe:             "24h",
+    timeframe:             "4h",
     minOrganic:            75,
     minHolders:            1000,
     maxMcap:               10_000_000,
-    takeProfitFeePct:      3,
-    stopLossPct:           -10,
+    takeProfitPct:         3,
+    stopLossPct:           -30,
     outOfRangeWaitMinutes: 60,
     managementIntervalMin: 15,
     screeningIntervalMin:  60,
-    description: "24h timeframe, stable pools only, avoids pumps. Lower yield, lower risk.",
+    description: "Stricter filters, smaller concurrency, slower cycles.",
   },
 };
 
@@ -256,9 +256,9 @@ const maxMcap = await askNum(
 // ─── Section 6: Exit Rules ────────────────────────────────────────────────────
 console.log("\n── Exit Rules ────────────────────────────────────────────────");
 
-const takeProfitFeePct = await askNum(
-  "Take profit when fees earned >= X% of deployed capital",
-  p("takeProfitFeePct", 5),
+const takeProfitPct = await askNum(
+  "Take profit when PnL >= X%",
+  p("takeProfitPct", 5),
   { min: 0.1, max: 100 }
 );
 
@@ -391,7 +391,7 @@ const userConfig = {
   minOrganic,
   minHolders,
   maxMcap,
-  takeProfitFeePct,
+  takeProfitPct,
   stopLossPct,
   outOfRangeWaitMinutes,
   managementIntervalMin,
@@ -425,7 +425,7 @@ console.log(`
   Deploy:       ${deployAmountSol} SOL/position  ·  max ${maxPositions} positions
   Min balance:  ${minSolToOpen} SOL to open new position
   Timeframe:    ${timeframe}  ·  organic ≥ ${minOrganic}  ·  holders ≥ ${minHolders}
-  Take profit:  fees ≥ ${takeProfitFeePct}%
+  Take profit:  PnL ≥ ${takeProfitPct}%
   Stop loss:    ${stopLossPct}% price drop
   OOR close:    after ${outOfRangeWaitMinutes} min
 
