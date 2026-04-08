@@ -689,7 +689,7 @@ async function _runScreeningCycleInner({ silent = false } = {}) {
     // Fetch top candidates with a hard timeout — multiple HTTP fetches inside
     // (OKX, Traxr, PVP, etc.) can hang if any upstream is slow.
     log("cron", "Fetching top candidates...");
-    const topCandidatesPromise = getTopCandidates({ limit: 10 });
+    const topCandidatesPromise = getTopCandidates({ limit: 20 });
     const timeoutPromise = new Promise((resolve) =>
       setTimeout(() => resolve({ __timeout: true }), 60_000)
     );
