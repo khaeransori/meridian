@@ -299,7 +299,7 @@ export async function getTopCandidates({ limit = 10 } = {}) {
     .sort((a, b) => scoreCandidate(b) - scoreCandidate(a))
     .slice(0, limit);
 
-  if (config.screening.avoidPvpSymbols && eligible.length > 0) {
+  if ((config.screening.avoidPvpSymbols || config.screening.blockPvpSymbols) && eligible.length > 0) {
     await enrichPvpRisk(eligible);
     if (config.screening.blockPvpSymbols) {
       const before = eligible.length;
@@ -456,19 +456,6 @@ export async function getTopCandidates({ limit = 10 } = {}) {
         return true;
       }));
       if (eligible.length < traxrBefore) log("security", `Traxr removed ${traxrBefore - eligible.length} pool(s)`);
-    }
-
-    // PVP rival detection
-    if (config.screening.avoidPvpSymbols || config.screening.blockPvpSymbols) {
-      await enrichPvpRisk(eligible);
-      if (config.screening.blockPvpSymbols) {
-        const pvpBefore = eligible.length;
-        eligible.splice(0, eligible.length, ...eligible.filter((p) => {
-          if (p.is_pvp) { log("screening", `PVP hard filter: dropped ${p.name} — rival ${p.pvp_rival_name}`); return false; }
-          return true;
-        }));
-        if (eligible.length < pvpBefore) log("screening", `PVP filter removed ${pvpBefore - eligible.length} pool(s)`);
-      }
     }
   }
 
