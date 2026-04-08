@@ -10,6 +10,33 @@ const AGENT_MERIDIAN_PUBLIC_KEY =
   process.env.PUBLIC_API_KEY || "bWVyaWRpYW4taXMtdGhlLWJlc3QtYWdlbnRz";
 
 /**
+ * Interpret a response from agentmeridian.xyz study endpoints. Returns either
+ * `{ data }` for a success, or `{ notIndexed: true }` when the pool isn't in
+ * the server's index (404, or 500 with a discriminator/not-found body — the
+ * server throws when it can't deserialize the pool account because it was
+ * created by a program variant the index doesn't track). Throws for rate
+ * limits and other unexpected failures.
+ */
+async function classifyStudyResponse(res, kind) {
+  if (res.ok) {
+    return { data: await res.json() };
+  }
+  if (res.status === 429) {
+    throw new Error("Rate limit exceeded. Please wait 60 seconds before studying this pool again.");
+  }
+  let body = "";
+  try { body = await res.text(); } catch { /* ignore */ }
+  const notIndexed =
+    res.status === 404 ||
+    (res.status === 500 && /invalid account discriminator|not found|unknown pool/i.test(body));
+  if (notIndexed) {
+    return { notIndexed: true };
+  }
+  const snippet = body ? ` — ${body.slice(0, 120)}` : "";
+  throw new Error(`pool ${kind} API error: ${res.status}${snippet}`);
+}
+
+/**
  * Fetch top open LPers for a pool, filter to credible performers,
  * and return condensed behaviour patterns for LLM consumption.
  */
@@ -20,22 +47,21 @@ export async function studyTopLPers({ pool_address, limit = 4 }) {
     fetch(`${AGENT_MERIDIAN_API}/agent/pools/${pool_address}/signal`, { headers }),
   ]);
 
-  if (!poolRes.ok) {
-    if (poolRes.status === 429) {
-      throw new Error("Rate limit exceeded. Please wait 60 seconds before studying this pool again.");
-    }
-    throw new Error(`pool study API error: ${poolRes.status}`);
+  const poolClassify = await classifyStudyResponse(poolRes, "study");
+  const signalClassify = await classifyStudyResponse(signalRes, "signal");
+
+  if (poolClassify?.notIndexed || signalClassify?.notIndexed) {
+    return {
+      pool: pool_address,
+      message:
+        "Pool not indexed by agentmeridian.xyz — study_top_lpers has no data for this pool. Try a pool surfaced by the screener.",
+      patterns: {},
+      lpers: [],
+    };
   }
 
-  if (!signalRes.ok) {
-    if (signalRes.status === 429) {
-      throw new Error("Rate limit exceeded. Please wait 60 seconds before studying this pool again.");
-    }
-    throw new Error(`pool signal API error: ${signalRes.status}`);
-  }
-
-  const poolData = await poolRes.json();
-  const signalData = await signalRes.json();
+  const poolData = poolClassify.data;
+  const signalData = signalClassify.data;
   const rows = Array.isArray(poolData.rows) ? poolData.rows : [];
   const overview = poolData.overview || {};
 
