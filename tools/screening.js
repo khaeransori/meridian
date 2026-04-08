@@ -173,11 +173,15 @@ export async function discoverPools({
       .filter(Boolean);
 
     if (config.screening.discordSignalMode === "only") {
+      log("screening", `Discord signals: mode=only, replacing ${rawPools.length} Meteora pool(s) with ${signalPools.length} signaled pool(s)`);
       rawPools = signalPools;
     } else if (signalPools.length > 0) {
       const byPool = new Map(rawPools.map((pool) => [pool.pool_address, pool]));
+      let overlapped = 0;
+      let added = 0;
       for (const signalPool of signalPools) {
         if (byPool.has(signalPool.pool_address)) {
+          overlapped++;
           byPool.set(signalPool.pool_address, {
             ...byPool.get(signalPool.pool_address),
             discord_signal: true,
@@ -187,10 +191,14 @@ export async function discoverPools({
             discord_signal_last_seen_at: signalPool.discord_signal_last_seen_at,
           });
         } else {
+          added++;
           byPool.set(signalPool.pool_address, signalPool);
         }
       }
       rawPools = Array.from(byPool.values());
+      log("screening", `Discord signals: mode=merge, ${signalPools.length} signaled (${added} new, ${overlapped} already in Meteora set) → ${rawPools.length} total pool(s)`);
+    } else {
+      log("screening", `Discord signals: mode=merge, feed empty — no merge performed`);
     }
   }
 
