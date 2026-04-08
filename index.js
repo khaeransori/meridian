@@ -18,7 +18,7 @@ import { checkSmartWalletsOnPool } from "./smart-wallets.js";
 import { getTokenNarrative, getTokenInfo } from "./tools/token.js";
 import { queryPoolConsensus, queryLessonConsensus } from "./hive-mind.js";
 import { getWeightsSummary } from "./signal-weights.js";
-import { bootstrapHiveMind, ensureAgentId, getHiveMindPullMode, isHiveMindEnabled, pullHiveMindLessons, pullHiveMindPresets, registerHiveMindAgent, startHiveMindBackgroundSync } from "./hivemind.js";
+import { bootstrapHiveMind, ensureAgentId, extractConsensusRules, fetchHiveSummary, getHiveMindPullMode, isHiveMindEnabled, matchCandidateToRule, pullHiveMindLessons, pullHiveMindPresets, registerHiveMindAgent, startHiveMindBackgroundSync } from "./hivemind.js";
 
 log("startup", "DLMM LP Agent starting...");
 log("startup", `Mode: ${process.env.DRY_RUN === "true" ? "DRY RUN" : "LIVE"}`);
@@ -703,6 +703,40 @@ async function _runScreeningCycleInner({ silent = false } = {}) {
     const candidates = (topCandidates?.candidates || topCandidates?.pools || []).slice(0, 10);
     log("cron", `Got ${candidates.length} candidates`);
     const earlyFilteredExamples = topCandidates?.filtered_examples || [];
+
+    // Shadow log: match candidates against hive strong/emerging consensus rules.
+    // Pure telemetry — does not affect deploy decisions. Used to answer
+    // "for pools I actually screen, does the hive have relevant overrides?"
+    // without betting capital on the answer. Run for ~1 week then review.
+    try {
+      const hiveSummary = await fetchHiveSummary();
+      if (hiveSummary) {
+        const { strong, emerging } = extractConsensusRules(hiveSummary);
+        const allRules = [...strong, ...emerging];
+        const activeLp = getActiveStrategy()?.lp_strategy || config.strategy.strategy;
+        let matchCount = 0;
+        let wouldSwitchCount = 0;
+        for (const pool of candidates) {
+          const match = matchCandidateToRule(pool, allRules);
+          if (!match) continue;
+          matchCount++;
+          const bucket = strong.includes(match) ? "strong" : "emerging";
+          const ruleStratMatchesActive = match.strategy === activeLp || activeLp === "any";
+          const wouldSwitch = match.action === "PREFER" && !ruleStratMatchesActive;
+          if (wouldSwitch) wouldSwitchCount++;
+          log(
+            "shadow",
+            `${pool.name} bs=${pool.bin_step} vol=${pool.volatility ?? "null"} → ${bucket} ${match.action} ${match.strategy} (agents=${match.distinctAgents}, samples=${match.sampleCount}) | active=${activeLp} | would_switch=${wouldSwitch ? "YES" : "no"}`,
+          );
+        }
+        log(
+          "shadow",
+          `summary: ${candidates.length} candidates, ${matchCount} hive matches (${strong.length} strong + ${emerging.length} emerging rules available), ${wouldSwitchCount} would switch strategy`,
+        );
+      }
+    } catch (e) {
+      log("shadow_warn", `Shadow-log skipped: ${e.message}`);
+    }
 
     const allCandidates = [];
     for (const pool of candidates) {

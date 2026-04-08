@@ -344,3 +344,150 @@ export async function pushHivePerformanceEvent(perf) {
     return null;
   }
 }
+
+// ─── Shadow-log helpers: hive summary + rule matching ──────────────────────
+// Used by the screening cycle to record what pool-specific consensus rules
+// would have applied to each candidate — pure logging, no deploy effect.
+
+// The summary endpoint is a known public resource at a fixed host, unlike
+// the lesson push/pull endpoints which are configurable per-agent via
+// `hiveMind.url` in user-config. Hardcoding avoids misdirection when a local
+// config points `hiveMindUrl` at an unrelated host (e.g. a legacy railway URL).
+const SUMMARY_URL = "https://api.agentmeridian.xyz/api/hivemind/summary/public";
+const SUMMARY_CACHE_TTL_MS = 5 * 60 * 1000; // 5 min — screening runs every 15m
+const SUMMARY_TIMEOUT_MS = 5_000;
+let _summaryCache = null;
+let _summaryCacheAt = 0;
+
+/**
+ * Fetch the public hive summary. No authentication required.
+ * Caches the result for 5 minutes to avoid re-fetching on back-to-back calls.
+ * Returns null on failure so callers degrade gracefully.
+ */
+export async function fetchHiveSummary() {
+  const now = Date.now();
+  if (_summaryCache && (now - _summaryCacheAt) < SUMMARY_CACHE_TTL_MS) {
+    return _summaryCache;
+  }
+  try {
+    const res = await fetch(SUMMARY_URL, {
+      signal: AbortSignal.timeout(SUMMARY_TIMEOUT_MS),
+      headers: { accept: "application/json" },
+    });
+    if (!res.ok) {
+      log("hivemind_warn", `Hive summary fetch failed: HTTP ${res.status}`);
+      return null;
+    }
+    const data = await res.json();
+    _summaryCache = data;
+    _summaryCacheAt = now;
+    return data;
+  } catch (error) {
+    log("hivemind_warn", `Hive summary fetch error: ${error.message}`);
+    return null;
+  }
+}
+
+/**
+ * Parse a strong/emerging consensus rule string into a matchable structure.
+ * Rule format: `PREFER: <poolname>-type pools (volatility=<n|null>, bin_step=<n>) with strategy="<s>" — ...`
+ * Or:          `WORKED: <poolname>, strategy=<s>, bin_step=<n>, volatility=<n>, ...`
+ * Returns { poolBase, binStep, volatility, strategy, action } or null if unparseable.
+ */
+// Normalize a pool name like "BabyTrump-SOL" or "petro" to its base token symbol
+// ("babytrump", "petro") for consistent matching between parser and matcher.
+function normalizePoolBase(name) {
+  return String(name || "").trim().split("-")[0].toLowerCase();
+}
+
+export function parseConsensusRule(ruleText) {
+  if (!ruleText || typeof ruleText !== "string") return null;
+
+  // Format 1: PREFER/AVOID rules
+  //   "PREFER: BabyTrump-SOL-type pools (volatility=null, bin_step=125) with strategy=\"bid_ask\" — ..."
+  const preferMatch = ruleText.match(
+    /^(PREFER|AVOID):\s*(.+?)-type\s+pools\s*\(volatility=([^,)]+),\s*bin_step=(\d+)\)\s*with\s+strategy="([^"]+)"/i
+  );
+  if (preferMatch) {
+    const [, action, poolName, volRaw, binStepRaw, strategy] = preferMatch;
+    return {
+      action: action.toUpperCase(),
+      poolBase: normalizePoolBase(poolName),
+      binStep: Number(binStepRaw),
+      volatility: volRaw === "null" ? null : Number(volRaw),
+      strategy: strategy.toLowerCase(),
+    };
+  }
+
+  // Format 2: WORKED rules
+  //   "WORKED: PETRO-SOL, strategy=spot, bin_step=100, volatility=0.7, ..."
+  const workedMatch = ruleText.match(
+    /^WORKED:\s*([^,]+),\s*strategy=([a-z_]+),\s*bin_step=(\d+),\s*volatility=([^,]+)/i
+  );
+  if (workedMatch) {
+    const [, poolName, strategy, binStepRaw, volRaw] = workedMatch;
+    return {
+      action: "PREFER",
+      poolBase: normalizePoolBase(poolName),
+      binStep: Number(binStepRaw),
+      volatility: volRaw === "null" ? null : Number(volRaw),
+      strategy: strategy.toLowerCase(),
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Match a candidate pool against parsed consensus rules. A rule matches when:
+ * - The pool's base symbol (before the dash) matches the rule's poolBase case-insensitively
+ * - The bin_step matches exactly
+ * - The volatility is within 1.0 of the rule's volatility (null matches null)
+ *
+ * Returns the first matching rule or null.
+ */
+export function matchCandidateToRule(candidate, rules) {
+  if (!candidate || !Array.isArray(rules) || !rules.length) return null;
+  const candBase = normalizePoolBase(candidate.name || candidate.pool_name || "");
+  if (!candBase) return null;
+  const candBinStep = Number(candidate.bin_step || candidate.binStep || 0);
+  const candVol = candidate.volatility != null ? Number(candidate.volatility) : null;
+
+  for (const rule of rules) {
+    if (rule.poolBase !== candBase) continue;
+    if (rule.binStep !== candBinStep) continue;
+    // Volatility match: null↔null, or both defined within 1.0
+    if (rule.volatility == null && candVol != null) continue;
+    if (rule.volatility != null && candVol == null) continue;
+    if (rule.volatility != null && candVol != null && Math.abs(rule.volatility - candVol) > 1.0) continue;
+    return rule;
+  }
+  return null;
+}
+
+/**
+ * Extract parsed strong + emerging consensus rules from a hive summary.
+ * Only keeps rules that parse cleanly; malformed ones are silently dropped.
+ * Returns { strong: [...], emerging: [...] } with per-rule metadata preserved.
+ */
+export function extractConsensusRules(summary) {
+  if (!summary?.consensus) return { strong: [], emerging: [] };
+  const enrich = (bucket) => bucket
+    .map((item) => {
+      const parsed = parseConsensusRule(item.rule);
+      if (!parsed) return null;
+      return {
+        ...parsed,
+        rule: item.rule,
+        distinctAgents: item.distinctAgents || 0,
+        sampleCount: item.sampleCount || 0,
+        score: item.score || 0,
+        confidence: item.confidence || 0,
+      };
+    })
+    .filter(Boolean);
+  return {
+    strong: enrich(summary.consensus.strong || []),
+    emerging: enrich(summary.consensus.emerging || []),
+  };
+}
