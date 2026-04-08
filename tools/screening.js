@@ -20,7 +20,7 @@ function normalizeSymbol(symbol) {
   return String(symbol || "").trim().toUpperCase();
 }
 
-function scoreCandidateForPvp(pool) {
+function scoreCandidate(pool) {
   const feeTvl = Number(pool.fee_active_tvl_ratio || 0);
   const organic = Number(pool.organic_score || 0);
   const volume = Number(pool.volume_window || 0);
@@ -59,7 +59,7 @@ async function findRivalPool(mint) {
 
 async function enrichPvpRisk(pools) {
   const shortlist = [...pools]
-    .sort((a, b) => scoreCandidateForPvp(b) - scoreCandidateForPvp(a))
+    .sort((a, b) => scoreCandidate(b) - scoreCandidate(a))
     .slice(0, PVP_SHORTLIST_LIMIT);
 
   if (shortlist.length === 0) return;
