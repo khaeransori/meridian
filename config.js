@@ -44,6 +44,8 @@ export const config = {
     timeframe:         u.timeframe         ?? "5m",
     category:          u.category          ?? "trending",
     minTokenFeesSol:   u.minTokenFeesSol   ?? 30,  // global fees paid (priority+jito tips). below = bundled/scam
+    useDiscordSignals: u.useDiscordSignals ?? false,
+    discordSignalMode: u.discordSignalMode ?? "merge", // merge | only
     maxBundlePct:      u.maxBundlePct      ?? 30,  // max bundle holding % (OKX advanced-info)
     maxBotHoldersPct:  u.maxBotHoldersPct  ?? 30,  // max bot holder addresses % (Jupiter audit)
     maxTop10Pct:       u.maxTop10Pct       ?? 60,  // max top 10 holders concentration
@@ -237,6 +239,9 @@ export function reloadScreeningThresholds() {
     const s = config.screening;
     if (fresh.minFeeActiveTvlRatio != null) s.minFeeActiveTvlRatio = fresh.minFeeActiveTvlRatio;
     else if (fresh.minFeeTvlRatio != null) s.minFeeActiveTvlRatio = fresh.minFeeTvlRatio; // backward compat
+    if (fresh.useDiscordSignals !== undefined) s.useDiscordSignals = fresh.useDiscordSignals;
+    if (fresh.discordSignalMode != null) s.discordSignalMode = fresh.discordSignalMode;
+    if (fresh.excludeHighSupplyConcentration !== undefined) s.excludeHighSupplyConcentration = fresh.excludeHighSupplyConcentration;
     if (fresh.minOrganic     != null) s.minOrganic     = fresh.minOrganic;
     if (fresh.minHolders     != null) s.minHolders     = fresh.minHolders;
     if (fresh.minMcap        != null) s.minMcap        = fresh.minMcap;
