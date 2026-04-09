@@ -502,6 +502,11 @@ async function derivLesson(perf) {
  * @returns {{ changes: Object, rationale: Object } | null}
  */
 export function evolveThresholds(perfData, config) {
+  // Gate on config.darwin.enabled — makes the flag actually disable ALL auto-evolution,
+  // not just signal weights. Previously evolveThresholds ran unconditionally every 5
+  // closes, which meant darwinEnabled=false didn't stop threshold drift (e.g. a flawed
+  // maxVolatility tightening that excluded the best-performing high-vol buckets).
+  if (!config.darwin?.enabled) return null;
   if (!perfData || perfData.length < MIN_EVOLVE_POSITIONS) return null;
 
   // Rolling window — only learn from recent data
