@@ -133,6 +133,8 @@ PRIORITY ORDER for strategy and bins:
 HARD RULES:
 - Never use 'curve'.
 - Bin Step: Only deploy in pools with bin_step between 80 and 125.
+- For single-side SOL deploys (amount_y only, amount_x=0), do not request upside exposure:
+  use bins_below only, keep bins_above=0, and the upper bin will be pinned to the current active bin.
 
 Guidelines (only when user hasn't specified):
 - Strategy: use the active strategy's lp_strategy field (bid_ask or spot)
@@ -166,19 +168,19 @@ WARNING: This executes a real on-chain transaction. Check DRY_RUN mode.`,
           },
           bins_below: {
             type: "number",
-            description: "Number of bins below active bin. Use this for explicit bin-based deploys. If downside_pct is provided, that percentage-based range takes priority and bins are derived automatically via the SDK."
+            description: "Number of bins below the current active bin. For single-side SOL deploys, this is the main range input: lower bin = active bin - bins_below, upper bin = active bin."
           },
           bins_above: {
             type: "number",
-            description: "Number of bins above active bin. MUST be 0 for bid_ask strategy unless the user explicitly wants upside exposure. If upside_pct is provided, that percentage-based range takes priority and bins are derived automatically via the SDK."
+            description: "Number of bins above the current active bin. Keep this at 0 for single-side SOL deploys. Only use this for dual-sided or explicit upside-exposure deploys."
           },
           downside_pct: {
             type: "number",
-            description: "Optional human-friendly downside range in percent below the current active price. Example: 50 means target roughly -50% downside coverage. Converted to bins internally via the Meteora SDK."
+            description: "Optional human-friendly downside range in percent below the current active price. Converted to bins internally via the Meteora SDK."
           },
           upside_pct: {
             type: "number",
-            description: "Optional human-friendly upside range in percent above the current active price. Example: 10 means target roughly +10% upside coverage. Converted to bins internally via the Meteora SDK."
+            description: "Optional human-friendly upside range in percent above the current active price. Do not use this for single-side SOL deploys."
           },
           pool_name: { type: "string", description: "Human-readable pool name for record-keeping" },
           base_mint: { type: "string", description: "Base token mint address — used to prevent duplicate token exposure across pools" },
@@ -591,8 +593,8 @@ Returns pool address, name, bin_step, fee %, TVL, volume, and token mints.`,
 Use this when the user asks "who are the top LPers in this pool?" or wants to
 know how others are performing in a specific pool without saving lessons.
 
-Returns: aggregate open-position patterns (avg hold time, open PnL, range width,
-distance to active, fee/TVL) and per-LPer summaries from Agent Meridian pool data.`,
+Returns: aggregate LPAgent-backed top-LPer patterns from the Agent Meridian
+\`/top-lp/:pool\` endpoint. Data is cached server-side and refreshed on a 30m cadence.`,
       parameters: {
         type: "object",
         properties: {
@@ -615,12 +617,15 @@ distance to active, fee/TVL) and per-LPer summaries from Agent Meridian pool dat
     function: {
       name: "study_top_lpers",
       description: `Fetch and analyze top open LPers for a pool to learn from their behaviour.
-Returns aggregate open-position patterns and per-owner open-position samples.
+Returns LPAgent-backed owner aggregates and historical style/range samples from
+the Agent Meridian \`/study-top-lp/:pool\` endpoint.
 
 Use this before deploying into a new pool to:
 - See if top performers are scalpers (< 1h holds) or long-term holders.
 - Match your strategy and range to what is actually working for others right now.
-- Avoid pools where even the best open LPs are poorly placed or losing.`,
+- Avoid pools where even the best open LPs are poorly placed or losing.
+
+Server note: study data is cached and refreshed every 30 minutes.`,
       parameters: {
         type: "object",
         properties: {

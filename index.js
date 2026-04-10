@@ -892,6 +892,8 @@ STEPS:
    - ${deployAmount} SOL (your standard allocation)
    - ${(config.risk.maxPoolExposurePct * 100).toFixed(0)}% of the pool's active_tvl (to avoid whale risk)
    bins_below = round(35 + (volatility/5)*55) clamped to [35,90].
+   For single-side SOL deploys, do not invent upside:
+   set amount_y only, keep amount_x = 0, keep bins_above = 0, and let the upper bin stay at the active bin.
 3. Report in this exact format (no tables, no extra sections):
    🚀 DEPLOYED
 

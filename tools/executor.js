@@ -199,6 +199,10 @@ const toolMap = {
       hiveMindApiKey: ["hiveMind", "apiKey"],
       agentId: ["hiveMind", "agentId"],
       hiveMindPullMode: ["hiveMind", "pullMode"],
+      // meridian api / relay
+      publicApiKey: ["api", "publicApiKey"],
+      agentMeridianApiUrl: ["api", "url"],
+      lpAgentRelayEnabled: ["api", "lpAgentRelayEnabled"],
     };
 
     const applied = {};

@@ -80,6 +80,9 @@
   "darwinMinSamples": 10,
 
   "agentId": "",
+  "publicApiKey": "",
+  "agentMeridianApiUrl": "https://api.agentmeridian.xyz/api",
+  "lpAgentRelayEnabled": false,
   "telegramChatId": "",
 
   "hiveMindUrl": "",
