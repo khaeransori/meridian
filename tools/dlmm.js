@@ -681,26 +681,32 @@ export async function getPositionPnl({ pool_address, position_address }) {
   position_address = normalizeMint(position_address);
   const walletAddress = getWallet().publicKey.toString();
   if (shouldUseLpAgentRelay()) {
-    const payload = await fetchOpenPositionsFromMeridian({
-      walletAddress,
-      agentId: config.hiveMind.agentId || "agent-local",
-    });
-    const p = payload?.positions?.find((position) => position.position === position_address);
-    if (!p) return { error: "Position not found in relay positions API" };
-    return {
-      pnl_usd: p.pnl_usd,
-      pnl_pct: p.pnl_pct,
-      current_value_usd: p.total_value_usd,
-      unclaimed_fee_usd: p.unclaimed_fees_usd,
-      all_time_fees_usd: p.collected_fees_usd,
-      fee_per_tvl_24h: p.fee_per_tvl_24h,
-      in_range: p.in_range,
-      lower_bin: p.lower_bin,
-      upper_bin: p.upper_bin,
-      active_bin: p.active_bin,
-      age_minutes: p.age_minutes,
-      request_id: payload?.requestId || null,
-    };
+    try {
+      const payload = await fetchOpenPositionsFromMeridian({
+        walletAddress,
+        agentId: config.hiveMind.agentId || "agent-local",
+      });
+      const p = payload?.positions?.find((position) => position.position === position_address);
+      if (p) {
+        return {
+          pnl_usd: p.pnl_usd,
+          pnl_pct: p.pnl_pct,
+          current_value_usd: p.total_value_usd,
+          unclaimed_fee_usd: p.unclaimed_fees_usd,
+          all_time_fees_usd: p.collected_fees_usd,
+          fee_per_tvl_24h: p.fee_per_tvl_24h,
+          in_range: p.in_range,
+          lower_bin: p.lower_bin,
+          upper_bin: p.upper_bin,
+          active_bin: p.active_bin,
+          age_minutes: p.age_minutes,
+          request_id: payload?.requestId || null,
+        };
+      }
+      log("pnl_warn", "Relay positions API did not include requested position; falling back to Meteora PnL path");
+    } catch (error) {
+      log("pnl_warn", `Relay PnL lookup failed; falling back to Meteora PnL path: ${error.message}`);
+    }
   }
   try {
     const byAddress = await fetchDlmmPnlForPool(pool_address, walletAddress);
@@ -795,20 +801,24 @@ export async function getMyPositions({ force = false, silent = false } = {}) {
 
   _positionsInflight = (async () => { try {
     if (shouldUseLpAgentRelay()) {
-      if (!silent) log("positions", "Fetching open positions via Agent Meridian relay...");
-      const result = await fetchOpenPositionsFromMeridian({
-        walletAddress,
-        agentId: config.hiveMind.agentId || "agent-local",
-      });
-      syncOpenPositions((result.positions || []).map((p) => p.position));
-      _positionsCache = {
-        wallet: walletAddress,
-        total_positions: Number(result.total_positions || 0),
-        positions: Array.isArray(result.positions) ? result.positions : [],
-        request_id: result.requestId || null,
-      };
-      _positionsCacheAt = Date.now();
-      return _positionsCache;
+      try {
+        if (!silent) log("positions", "Fetching open positions via Agent Meridian relay...");
+        const result = await fetchOpenPositionsFromMeridian({
+          walletAddress,
+          agentId: config.hiveMind.agentId || "agent-local",
+        });
+        syncOpenPositions((result.positions || []).map((p) => p.position));
+        _positionsCache = {
+          wallet: walletAddress,
+          total_positions: Number(result.total_positions || 0),
+          positions: Array.isArray(result.positions) ? result.positions : [],
+          request_id: result.requestId || null,
+        };
+        _positionsCacheAt = Date.now();
+        return _positionsCache;
+      } catch (error) {
+        log("positions_warn", `Agent Meridian relay failed; falling back to Meteora/local positions path: ${error.message}`);
+      }
     }
 
     // Portfolio API discovers open pools/positions for this wallet.
