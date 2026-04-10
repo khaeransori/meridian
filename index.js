@@ -19,6 +19,7 @@ import { getTokenNarrative, getTokenInfo } from "./tools/token.js";
 import { queryPoolConsensus, queryLessonConsensus } from "./hive-mind.js";
 import { getWeightsSummary } from "./signal-weights.js";
 import { bootstrapHiveMind, ensureAgentId, extractConsensusRules, fetchHiveSummary, getHiveMindPullMode, isHiveMindEnabled, matchCandidateToRule, pullHiveMindLessons, pullHiveMindPresets, registerHiveMindAgent, startHiveMindBackgroundSync } from "./hivemind.js";
+import { appendDecision } from "./decision-log.js";
 
 log("startup", "DLMM LP Agent starting...");
 log("startup", `Mode: ${process.env.DRY_RUN === "true" ? "DRY RUN" : "LIVE"}`);
@@ -644,12 +645,24 @@ async function _runScreeningCycleInner({ silent = false } = {}) {
     [prePositions, preBalance] = await Promise.all([getMyPositions({ force: true }), getWalletBalances()]);
     if (prePositions.total_positions >= config.risk.maxPositions) {
       log("cron", `Screening skipped — max positions reached (${prePositions.total_positions}/${config.risk.maxPositions})`);
+      appendDecision({
+        type: "skip",
+        actor: "SCREENER",
+        summary: "Screening skipped",
+        reason: `Max positions reached (${prePositions.total_positions}/${config.risk.maxPositions})`,
+      });
       return `Screening skipped — max positions reached (${prePositions.total_positions}/${config.risk.maxPositions}).`;
     }
     const minRequired = config.management.deployAmountSol + config.management.gasReserve;
     const isDryRun = process.env.DRY_RUN === "true";
     if (!isDryRun && preBalance.sol < minRequired) {
       log("cron", `Screening skipped — insufficient SOL (${preBalance.sol.toFixed(3)} < ${minRequired} needed for deploy + gas)`);
+      appendDecision({
+        type: "skip",
+        actor: "SCREENER",
+        summary: "Screening skipped",
+        reason: `Insufficient SOL (${preBalance.sol.toFixed(3)} < ${minRequired})`,
+      });
       return `Screening skipped — insufficient SOL (${preBalance.sol.toFixed(3)} < ${minRequired} needed for deploy + gas).`;
     }
   } catch (e) {
@@ -800,6 +813,13 @@ async function _runScreeningCycleInner({ silent = false } = {}) {
       screenReport = combinedExamples
         ? `No candidates available.\nFiltered examples:\n${combinedExamples}`
         : `No candidates available (all filtered by launchpad / holder-quality rules).`;
+      appendDecision({
+        type: "no_deploy",
+        actor: "SCREENER",
+        summary: "No candidates available",
+        reason: combinedExamples || "All candidates filtered before deploy",
+        rejected: combined.slice(0, 5).map((entry) => `${entry.name}: ${entry.reason}`),
+      });
       return screenReport;
     }
 
@@ -933,6 +953,14 @@ IMPORTANT:
         hiveContext: hiveLessonBlock || null,
       });
     screenReport = content;
+    if (/⛔\s*NO DEPLOY/i.test(content)) {
+      appendDecision({
+        type: "no_deploy",
+        actor: "SCREENER",
+        summary: "LLM chose no deploy",
+        reason: stripThink(content).slice(0, 500),
+      });
+    }
   } catch (error) {
     log("cron_error", `Screening cycle failed: ${error.message}`);
     screenReport = `Screening cycle failed: ${error.message}`;

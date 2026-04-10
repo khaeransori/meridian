@@ -32,6 +32,9 @@ context.md
 # Discord listener queue
 discord-signals.json
 
+# Decision log (runtime state)
+decision-log.json
+
 # Playwright MCP browser logs
 .playwright-mcp/
 

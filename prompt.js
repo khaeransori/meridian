@@ -12,7 +12,7 @@
 import { config } from "./config.js";
 import { getActivePatterns } from "./lessons.js";
 
-export function buildSystemPrompt(agentType, portfolio, positions, stateSummary = null, lessons = null, perfSummary = null, hiveContext = null) {
+export function buildSystemPrompt(agentType, portfolio, positions, stateSummary = null, lessons = null, perfSummary = null, hiveContext = null, decisionSummary = null) {
   const s = config.screening;
 
   // Filter hive lessons that contradict local lessons (local wins)
@@ -85,6 +85,11 @@ ${lessons ? `══════════════════════�
  LESSONS LEARNED
 ═══════════════════════════════════════════
 ${lessons}` : ""}
+
+${decisionSummary ? `═══════════════════════════════════════════
+ RECENT DECISIONS
+═══════════════════════════════════════════
+${decisionSummary}` : ""}
 
 ═══════════════════════════════════════════
  BEHAVIORAL CORE
