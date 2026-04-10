@@ -20,6 +20,9 @@ strategy-library.json
 # Logs
 logs/
 
+# Docs (generated / local-only)
+docs/
+
 # OS
 .DS_Store
 
