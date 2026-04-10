@@ -3,6 +3,7 @@ import { isBlacklisted } from "../token-blacklist.js";
 import { isDevBlocked, getBlockedDevs } from "../dev-blocklist.js";
 import { log } from "../logger.js";
 import { isBaseMintOnCooldown, isPoolOnCooldown } from "../pool-memory.js";
+import { confirmIndicatorPreset } from "./chart-indicators.js";
 
 const DATAPI_JUP = "https://datapi.jup.ag/v1";
 
@@ -475,6 +476,45 @@ export async function getTopCandidates({ limit = 10 } = {}) {
         return true;
       }));
       if (eligible.length < traxrBefore) log("security", `Traxr removed ${traxrBefore - eligible.length} pool(s)`);
+    }
+  }
+
+  if (config.indicators.enabled && eligible.length > 0) {
+    const confirmations = await Promise.all(
+      eligible.map(async (pool) => {
+        try {
+          const confirmation = await confirmIndicatorPreset({
+            mint: pool.base?.mint,
+            side: "entry",
+          });
+          return { pool: pool.pool, confirmation };
+        } catch (error) {
+          return {
+            pool: pool.pool,
+            confirmation: {
+              enabled: true,
+              confirmed: true,
+              skipped: true,
+              reason: `Indicator confirmation unavailable: ${error.message}`,
+              intervals: [],
+            },
+          };
+        }
+      }),
+    );
+    const confirmationByPool = new Map(confirmations.map((entry) => [entry.pool, entry.confirmation]));
+    const before = eligible.length;
+    const confirmedEligible = eligible.filter((pool) => {
+      const confirmation = confirmationByPool.get(pool.pool);
+      pool.indicator_confirmation = confirmation || null;
+      if (!confirmation || confirmation.confirmed) return true;
+      pushFilteredReason(filteredOut, pool, `indicator reject: ${confirmation.reason}`);
+      log("screening", `Indicator rejected ${pool.name} (${pool.pool.slice(0, 8)}): ${confirmation.reason}`);
+      return false;
+    });
+    eligible.splice(0, eligible.length, ...confirmedEligible);
+    if (eligible.length < before) {
+      log("screening", `Indicator confirmation removed ${before - eligible.length} candidate(s)`);
     }
   }
 

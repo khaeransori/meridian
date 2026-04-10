@@ -21,6 +21,8 @@ if (u.dryRun !== undefined) process.env.DRY_RUN ||= String(u.dryRun);
 if (u.publicApiKey) process.env.PUBLIC_API_KEY ||= u.publicApiKey;
 if (u.agentMeridianApiUrl) process.env.AGENT_MERIDIAN_API_URL ||= u.agentMeridianApiUrl;
 
+const indicatorUserConfig = u.chartIndicators ?? {};
+
 export const config = {
   // ─── Third-party security ────────────────
   traxrEnabled: u.traxrEnabled ?? true,
@@ -200,6 +202,20 @@ export const config = {
     url: u.agentMeridianApiUrl ?? process.env.AGENT_MERIDIAN_API_URL ?? DEFAULT_AGENT_MERIDIAN_API_URL,
     publicApiKey: u.publicApiKey ?? process.env.PUBLIC_API_KEY ?? "",
     lpAgentRelayEnabled: u.lpAgentRelayEnabled ?? false,
+  },
+
+  indicators: {
+    enabled: indicatorUserConfig.enabled ?? false,
+    entryPreset: indicatorUserConfig.entryPreset ?? "supertrend_break",
+    exitPreset: indicatorUserConfig.exitPreset ?? "supertrend_break",
+    rsiLength: indicatorUserConfig.rsiLength ?? 2,
+    intervals: Array.isArray(indicatorUserConfig.intervals)
+      ? indicatorUserConfig.intervals
+      : ["5_MINUTE", "15_MINUTE"],
+    candles: indicatorUserConfig.candles ?? 298,
+    rsiOversold: indicatorUserConfig.rsiOversold ?? 30,
+    rsiOverbought: indicatorUserConfig.rsiOverbought ?? 80,
+    requireAllIntervals: indicatorUserConfig.requireAllIntervals ?? false,
   },
 };
 
