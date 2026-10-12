@@ -20,7 +20,8 @@
     "test:screen": "node test/test-screening.js",
     "test:agent": "DRY_RUN=true node test/test-agent.js",
     "postinstall": "node scripts/patch-anchor.js",
-    "test:gmgn": "DRY_RUN=true node test/test-gmgn-mock.js && DRY_RUN=true node test/test-config-gmgn.js"
+    "test:gmgn": "DRY_RUN=true node test/test-gmgn-mock.js && DRY_RUN=true node test/test-config-gmgn.js",
+    "test:hardening": "node test/test-hardening.js"
   },
   "dependencies": {
     "@meteora-ag/dlmm": "1.9.4",
