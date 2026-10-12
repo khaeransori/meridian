@@ -153,13 +153,14 @@ export async function recordPerformance(perf) {
   } else {
     lesson = derivLesson(entry);
     if (lesson) {
+      if (perf.paper) lesson.paper = true; // DRY_RUN result — removed by `npm run reset:paper` before going live
       data.lessons.push(lesson);
       log("lessons", `New lesson: ${lesson.rule}`);
     }
   }
 
   save(data);
-  if (lesson) {
+  if (lesson && !lesson.paper) {
     void pushHiveLesson(lesson);
   }
 
@@ -187,6 +188,7 @@ export async function recordPerformance(perf) {
       exit_mcap: perf.exit_mcap,
       exit_tvl: perf.exit_tvl,
       exit_volume: perf.exit_volume,
+      paper: !!perf.paper,
     });
   }
 

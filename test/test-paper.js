@@ -38,6 +38,7 @@ global.fetch = async (u) => {
 try {
   const paper = await import("../tools/paper.js");
   const state = await import("../state.js");
+  (await import("../config.js")).config.paper.shadowVariants = false; // A/B tests switch it on explicitly
 
   let id;
   await t("open: simulated position, value = deposit", async () => {
@@ -106,6 +107,40 @@ try {
     assert.equal(perf.close_reason, "test close");
     const sum = paper.getPaperSummary();
     assert.equal(sum.closed, 1);
+  });
+
+  await t("A/B shadows: opened per variant, hidden from the bot, same entry", async () => {
+    market.priceSol = 0.001; paper._clearSnapshotCache();
+    const { config } = await import("../config.js");
+    fs.writeFileSync(repoPath("paper-positions.json"), JSON.stringify({ open: {}, closed: [] }));
+    config.paper.shadowVariants = true;
+    config.paper.variants = [{ id: "spot", strategy: "spot" }, { id: "wide_bidask", strategy: "bid_ask", downsidePct: 70 }];
+    const main = await paper.openPaperPosition({ pool_address: "PoolT", pool_name: "TEST-SOL", strategy: "bid_ask", amount_sol: 0.5, bins_below: 69, active_bin: 1000, bin_step: 100 });
+    const d = JSON.parse(fs.readFileSync(repoPath("paper-positions.json"), "utf8"));
+    const shadows = Object.values(d.open).filter((p) => p.shadow_of === main.position);
+    assert.equal(shadows.length, 2);
+    const wide = shadows.find((s) => s.variant === "wide_bidask");
+    assert.equal(wide.bins_below, 121, `wide bins ${wide.bins_below}`);
+    assert.ok(Math.abs(wide.downside_pct - 70) < 0.5, `downside ${wide.downside_pct}`);
+    assert.equal(wide.entry_price_sol, main.entry_price_sol);
+    assert.equal(paper.binsForDownside(70, 200), 61);
+    const rows = await paper.getPaperPositions();
+    assert.equal(rows.length, 1, "shadows must not count as bot positions");
+    assert.equal(paper.getPaperSummary().open, 1);
+    assert.equal(paper.getPaperSummary().variants.length, 3);
+  });
+
+  await t("A/B shadows: exit rules run independently (2-tick stop loss)", async () => {
+    market.priceSol = 0.001 / Math.pow(1.01, 60); paper._clearSnapshotCache();
+    await paper.markShadows(); paper._clearSnapshotCache();
+    await paper.markShadows();
+    const d = JSON.parse(fs.readFileSync(repoPath("paper-positions.json"), "utf8"));
+    const spotClosed = d.closed.find((p) => p.variant === "spot");
+    assert.ok(spotClosed, "spot shadow should hit stop loss after 2 ticks");
+    assert.match(spotClosed.close_reason, /Stop loss/);
+    assert.ok(Object.values(d.open).some((p) => !p.shadow), "main position untouched by shadow rules");
+    const v = paper.variantStats().find((x) => x.variant === "spot");
+    assert.equal(v.closed, 1);
   });
 
   await t("paper records never feed threshold evolution", async () => {

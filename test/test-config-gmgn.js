@@ -5,7 +5,7 @@ import fs from "fs";
 import { repoPath } from "../repo-root.js";
 
 process.env.DRY_RUN = "true";
-const files = ["user-config.json", "gmgn-config.json"].map((f) => repoPath(f));
+const files = ["user-config.json", "gmgn-config.json", "lessons.json"].map((f) => repoPath(f));
 const backup = Object.fromEntries(files.map((f) => [f, fs.existsSync(f) ? fs.readFileSync(f, "utf8") : null]));
 global.fetch = async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => "{}" });
 

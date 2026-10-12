@@ -6,7 +6,7 @@ import { fileURLToPath } from "url";
 import { agentLoop } from "./agent.js";
 import { log } from "./logger.js";
 import { getMyPositions, closePosition, getActiveBin } from "./tools/dlmm.js";
-import { getPaperSummary } from "./tools/paper.js";
+import { getPaperSummary, markShadows, isPaperMode } from "./tools/paper.js";
 import { getWalletBalances } from "./tools/wallet.js";
 import { getTopCandidates, degenScore, getPoolDetail } from "./tools/screening.js";
 import { formatGmgnCandidateForPrompt } from "./tools/gmgn.js";
@@ -186,6 +186,7 @@ function stopCronJobs() {
   for (const task of _cronTasks) task.stop();
   if (_cronTasks._pnlPollInterval) clearInterval(_cronTasks._pnlPollInterval);
   if (_cronTasks._opportunityPollInterval) clearInterval(_cronTasks._opportunityPollInterval);
+  if (_cronTasks._shadowInterval) clearInterval(_cronTasks._shadowInterval);
   _cronTasks = [];
 }
 
@@ -911,11 +912,18 @@ Summarize the current portfolio health, total fees earned, and performance of al
     }, oppMs);
   }
 
+  // Paper A/B shadows keep running after the main position closes, so mark them on their own clock
+  // (must stay under paper.js MAX_ACCRUAL_MIN = 5 min or fee accrual gets clipped).
+  const shadowInterval = isPaperMode()
+    ? setInterval(() => { markShadows().catch((e) => log("paper_warn", `shadow tick: ${e.message}`)); }, 60_000)
+    : null;
+
   if (!_lockWatchdog) _lockWatchdog = setInterval(checkStaleLocks, 30_000);
   _cronTasks = [mgmtTask, screenTask, healthTask, briefingTask, briefingWatchdog];
   // Store interval refs so stopCronJobs can clear them
   _cronTasks._pnlPollInterval = pnlPollInterval;
   _cronTasks._opportunityPollInterval = opportunityPollInterval;
+  _cronTasks._shadowInterval = shadowInterval;
   log("cron", `Cycles started — management every ${config.schedule.managementIntervalMin}m, screening every ${config.schedule.screeningIntervalMin}m${config.opportunity.enabled ? `, opportunity poll every ${config.opportunity.pollIntervalSec}s` : ""}`);
 }
 
@@ -1659,6 +1667,7 @@ async function telegramHandler(msg) {
       `Open: ${s.open} | Closed: ${s.closed}${s.win_rate_pct != null ? ` | Win rate: ${s.win_rate_pct}%` : ""}`,
       `Total PnL: ${s.total_pnl_sol} SOL${s.avg_pnl_pct != null ? ` | Avg: ${s.avg_pnl_pct}%` : ""}`,
       `Fees earned (est.): ${s.total_fees_sol} SOL | Slippage paid: ${s.total_slippage_sol} SOL`,
+      ...(s.variants.length > 1 ? ["", "A/B variants (same pools, same entries):", ...s.variants.map((v) => `• ${v.variant}: ${v.closed} closed${v.win_rate_pct != null ? `, win ${v.win_rate_pct}%` : ""}, PnL ${v.total_pnl_sol} SOL${v.avg_pnl_pct != null ? ` (avg ${v.avg_pnl_pct}%)` : ""}, ${v.open} open`)] : []),
       ...(s.last.length ? ["", "Last closes:", ...s.last.map((x) => `• ${x.pool}: ${x.pnl_pct}% in ${x.held_min}m — ${x.reason}`)] : []),
     ];
     await sendMessage(lines.join("\n")).catch(() => {});

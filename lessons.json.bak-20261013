@@ -1,0 +1,352 @@
+{
+  "lessons": [
+    {
+      "id": 1791822539730,
+      "rule": "[SELF-TUNED] Changed gmgnRequireKol=false — test",
+      "tags": [
+        "self_tune",
+        "config_change"
+      ],
+      "outcome": "manual",
+      "sourceType": "config_change",
+      "pinned": false,
+      "role": null,
+      "created_at": "2026-10-12T16:28:59.730Z"
+    },
+    {
+      "id": 1791822539733,
+      "rule": "[SELF-TUNED] Changed screeningSource=gmgn, gmgnMinHolders=750, gmgnMinRsi=30, gmgnPreferredKolNames=alpha,beta — test",
+      "tags": [
+        "self_tune",
+        "config_change"
+      ],
+      "outcome": "manual",
+      "sourceType": "config_change",
+      "pinned": false,
+      "role": null,
+      "created_at": "2026-10-12T16:28:59.733Z"
+    },
+    {
+      "id": 1791822539735,
+      "rule": "[SELF-TUNED] Changed gmgnApiKey=***redacted*** — test",
+      "tags": [
+        "self_tune",
+        "config_change"
+      ],
+      "outcome": "manual",
+      "sourceType": "config_change",
+      "pinned": false,
+      "role": null,
+      "created_at": "2026-10-12T16:28:59.735Z"
+    },
+    {
+      "id": 1791822550136,
+      "rule": "[SELF-TUNED] Changed gmgnRequireKol=false — test",
+      "tags": [
+        "self_tune",
+        "config_change"
+      ],
+      "outcome": "manual",
+      "sourceType": "config_change",
+      "pinned": false,
+      "role": null,
+      "created_at": "2026-10-12T16:29:10.136Z"
+    },
+    {
+      "id": 1791822550139,
+      "rule": "[SELF-TUNED] Changed screeningSource=gmgn, gmgnMinHolders=750, gmgnMinRsi=30, gmgnPreferredKolNames=alpha,beta — test",
+      "tags": [
+        "self_tune",
+        "config_change"
+      ],
+      "outcome": "manual",
+      "sourceType": "config_change",
+      "pinned": false,
+      "role": null,
+      "created_at": "2026-10-12T16:29:10.139Z"
+    },
+    {
+      "id": 1791822550141,
+      "rule": "[SELF-TUNED] Changed gmgnApiKey=***redacted*** — test",
+      "tags": [
+        "self_tune",
+        "config_change"
+      ],
+      "outcome": "manual",
+      "sourceType": "config_change",
+      "pinned": false,
+      "role": null,
+      "created_at": "2026-10-12T16:29:10.141Z"
+    },
+    {
+      "id": 1791822594516,
+      "rule": "[SELF-TUNED] Changed gmgnRequireKol=false — test",
+      "tags": [
+        "self_tune",
+        "config_change"
+      ],
+      "outcome": "manual",
+      "sourceType": "config_change",
+      "pinned": false,
+      "role": null,
+      "created_at": "2026-10-12T16:29:54.516Z"
+    },
+    {
+      "id": 1791822594521,
+      "rule": "[SELF-TUNED] Changed screeningSource=gmgn, gmgnMinHolders=750, gmgnMinRsi=30, gmgnPreferredKolNames=alpha,beta — test",
+      "tags": [
+        "self_tune",
+        "config_change"
+      ],
+      "outcome": "manual",
+      "sourceType": "config_change",
+      "pinned": false,
+      "role": null,
+      "created_at": "2026-10-12T16:29:54.521Z"
+    },
+    {
+      "id": 1791822594523,
+      "rule": "[SELF-TUNED] Changed gmgnApiKey=***redacted*** — test",
+      "tags": [
+        "self_tune",
+        "config_change"
+      ],
+      "outcome": "manual",
+      "sourceType": "config_change",
+      "pinned": false,
+      "role": null,
+      "created_at": "2026-10-12T16:29:54.523Z"
+    },
+    {
+      "id": 1791822809531,
+      "rule": "[SELF-TUNED] Changed gmgnRequireKol=false — test",
+      "tags": [
+        "self_tune",
+        "config_change"
+      ],
+      "outcome": "manual",
+      "sourceType": "config_change",
+      "pinned": false,
+      "role": null,
+      "created_at": "2026-10-12T16:33:29.531Z"
+    },
+    {
+      "id": 1791822809534,
+      "rule": "[SELF-TUNED] Changed screeningSource=gmgn, gmgnMinHolders=750, gmgnMinRsi=30, gmgnPreferredKolNames=alpha,beta — test",
+      "tags": [
+        "self_tune",
+        "config_change"
+      ],
+      "outcome": "manual",
+      "sourceType": "config_change",
+      "pinned": false,
+      "role": null,
+      "created_at": "2026-10-12T16:33:29.534Z"
+    },
+    {
+      "id": 1791822809536,
+      "rule": "[SELF-TUNED] Changed gmgnApiKey=***redacted*** — test",
+      "tags": [
+        "self_tune",
+        "config_change"
+      ],
+      "outcome": "manual",
+      "sourceType": "config_change",
+      "pinned": false,
+      "role": null,
+      "created_at": "2026-10-12T16:33:29.536Z"
+    },
+    {
+      "id": 1791822823313,
+      "rule": "[SELF-TUNED] Changed gmgnRequireKol=false — test",
+      "tags": [
+        "self_tune",
+        "config_change"
+      ],
+      "outcome": "manual",
+      "sourceType": "config_change",
+      "pinned": false,
+      "role": null,
+      "created_at": "2026-10-12T16:33:43.313Z"
+    },
+    {
+      "id": 1791822823316,
+      "rule": "[SELF-TUNED] Changed screeningSource=gmgn, gmgnMinHolders=750, gmgnMinRsi=30, gmgnPreferredKolNames=alpha,beta — test",
+      "tags": [
+        "self_tune",
+        "config_change"
+      ],
+      "outcome": "manual",
+      "sourceType": "config_change",
+      "pinned": false,
+      "role": null,
+      "created_at": "2026-10-12T16:33:43.316Z"
+    },
+    {
+      "id": 1791822823318,
+      "rule": "[SELF-TUNED] Changed gmgnApiKey=***redacted*** — test",
+      "tags": [
+        "self_tune",
+        "config_change"
+      ],
+      "outcome": "manual",
+      "sourceType": "config_change",
+      "pinned": false,
+      "role": null,
+      "created_at": "2026-10-12T16:33:43.318Z"
+    },
+    {
+      "id": 1791823588231,
+      "rule": "FAILED: HIRE-SOL (paper), strategy=bid_ask, bin_step=100, volatility=6.6032, fee_tvl_ratio=1.0064, organic=78, bin_range={\"min\":-492,\"max\":-423,\"bins_below\":69,\"bins_above\":0}, entry(mcap=1.6M, tvl=72K, vol=190) → PnL -14.74%, range efficiency 100%. Reason: Stop loss: PnL -15.93% <= -15%.",
+      "tags": [
+        "failed"
+      ],
+      "outcome": "bad",
+      "sourceType": "performance",
+      "confidence": 0.88,
+      "context": "HIRE-SOL (paper), strategy=bid_ask, bin_step=100, volatility=6.6032, fee_tvl_ratio=1.0064, organic=78, bin_range={\"min\":-492,\"max\":-423,\"bins_below\":69,\"bins_above\":0}, entry(mcap=1.6M, tvl=72K, vol=190)",
+      "pnl_pct": -14.74,
+      "fees_earned_usd": 1.229704566805211,
+      "initial_value_usd": 54.37723471744974,
+      "range_efficiency": 100,
+      "close_reason": "Stop loss: PnL -15.93% <= -15%",
+      "pool": "WD8AAiLGuvSaQEKkaZrkMGypTyJAoBNuRopwJqkCFyj",
+      "entry_mcap": 1579657.2638477536,
+      "entry_tvl": 71672.57967335342,
+      "entry_volume": 190.08490624695568,
+      "exit_mcap": null,
+      "exit_tvl": null,
+      "exit_volume": null,
+      "created_at": "2026-10-12T16:46:28.231Z"
+    },
+    {
+      "id": 1791823927226,
+      "rule": "[SELF-TUNED] Changed gmgnRequireKol=false — test",
+      "tags": [
+        "self_tune",
+        "config_change"
+      ],
+      "outcome": "manual",
+      "sourceType": "config_change",
+      "pinned": false,
+      "role": null,
+      "created_at": "2026-10-12T16:52:07.226Z"
+    },
+    {
+      "id": 1791823927230,
+      "rule": "[SELF-TUNED] Changed screeningSource=gmgn, gmgnMinHolders=750, gmgnMinRsi=30, gmgnPreferredKolNames=alpha,beta — test",
+      "tags": [
+        "self_tune",
+        "config_change"
+      ],
+      "outcome": "manual",
+      "sourceType": "config_change",
+      "pinned": false,
+      "role": null,
+      "created_at": "2026-10-12T16:52:07.230Z"
+    },
+    {
+      "id": 1791823927232,
+      "rule": "[SELF-TUNED] Changed gmgnApiKey=***redacted*** — test",
+      "tags": [
+        "self_tune",
+        "config_change"
+      ],
+      "outcome": "manual",
+      "sourceType": "config_change",
+      "pinned": false,
+      "role": null,
+      "created_at": "2026-10-12T16:52:07.232Z"
+    },
+    {
+      "id": 1791823928846,
+      "rule": "[SELF-TUNED] Changed gmgnRequireKol=false — test",
+      "tags": [
+        "self_tune",
+        "config_change"
+      ],
+      "outcome": "manual",
+      "sourceType": "config_change",
+      "pinned": false,
+      "role": null,
+      "created_at": "2026-10-12T16:52:08.846Z"
+    },
+    {
+      "id": 1791823928850,
+      "rule": "[SELF-TUNED] Changed screeningSource=gmgn, gmgnMinHolders=750, gmgnMinRsi=30, gmgnPreferredKolNames=alpha,beta — test",
+      "tags": [
+        "self_tune",
+        "config_change"
+      ],
+      "outcome": "manual",
+      "sourceType": "config_change",
+      "pinned": false,
+      "role": null,
+      "created_at": "2026-10-12T16:52:08.850Z"
+    },
+    {
+      "id": 1791823928852,
+      "rule": "[SELF-TUNED] Changed gmgnApiKey=***redacted*** — test",
+      "tags": [
+        "self_tune",
+        "config_change"
+      ],
+      "outcome": "manual",
+      "sourceType": "config_change",
+      "pinned": false,
+      "role": null,
+      "created_at": "2026-10-12T16:52:08.852Z"
+    }
+  ],
+  "performance": [
+    {
+      "position": "paper_mv5gxdkh_cujp4r",
+      "pool": "WD8AAiLGuvSaQEKkaZrkMGypTyJAoBNuRopwJqkCFyj",
+      "pool_name": "HIRE-SOL (paper)",
+      "base_mint": "98AG3zJUawbvDnpgbDhmxpMKva43vtgPLLPSXqo1pump",
+      "strategy": "bid_ask",
+      "bin_range": {
+        "min": -492,
+        "max": -423,
+        "bins_below": 69,
+        "bins_above": 0
+      },
+      "bin_step": 100,
+      "volatility": 6.6032,
+      "fee_tvl_ratio": 1.0064,
+      "organic_score": 78,
+      "amount_sol": 0.5,
+      "fees_earned_usd": 1.229704566805211,
+      "final_value_usd": 45.13102406113358,
+      "initial_value_usd": 54.37723471744974,
+      "minutes_held": 16,
+      "minutes_in_range": 16,
+      "close_reason": "Stop loss: PnL -15.93% <= -15%",
+      "deployed_at": "2026-10-12T16:30:24.499Z",
+      "entry_mcap": 1579657.2638477536,
+      "entry_tvl": 71672.57967335342,
+      "entry_volume": 190.08490624695568,
+      "entry_holders": 5439,
+      "signal_snapshot": {
+        "base_mint": "98AG3zJUawbvDnpgbDhmxpMKva43vtgPLLPSXqo1pump",
+        "organic_score": 78,
+        "fee_tvl_ratio": 1.0064,
+        "volume": 119000,
+        "mcap": 1493552,
+        "holder_count": 5431,
+        "smart_wallets_present": false,
+        "narrative_quality": "present",
+        "volatility": 6.6032,
+        "entry_mcap": 1579657.2638477536,
+        "entry_tvl": 71672.57967335342,
+        "entry_volume": 190.08490624695568
+      },
+      "paper": true,
+      "pnl_source_suspect": false,
+      "pnl_usd": -8.02,
+      "pnl_pct": -14.74,
+      "range_efficiency": 100,
+      "recorded_at": "2026-10-12T16:46:28.231Z"
+    }
+  ]
+}

@@ -118,8 +118,14 @@ function valueAt(pos, price) {
   return { sol, tokens, value_sol: sol + tokens * price, kNow, inRange, activeBin: pos.entry_active_bin - kActive, activeBinSol };
 }
 
-export async function openPaperPosition({ pool_address, pool_name, strategy, amount_sol, bins_below, active_bin, bin_step }) {
-  const snap = await getPoolSnapshot(pool_address, { force: true });
+/** bins needed so the range reaches -downsidePct% below entry at this bin step. */
+export function binsForDownside(downsidePct, binStep) {
+  const d = Math.min(99, Math.max(1, Number(downsidePct)));
+  return Math.ceil(Math.log(1 / (1 - d / 100)) / Math.log(1 + Number(binStep) / 10_000));
+}
+
+export async function openPaperPosition({ pool_address, pool_name, strategy, amount_sol, bins_below, active_bin, bin_step, variant = "baseline", shadow_of = null, _snap = null }) {
+  const snap = _snap || await getPoolSnapshot(pool_address, { force: true });
   const n = Math.max(1, Number(bins_below));
   const w = weights(strategy, n);
   const id = `paper_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -140,6 +146,10 @@ export async function openPaperPosition({ pool_address, pool_name, strategy, amo
     bin_sol: w.map((x) => x * amount_sol),
     fees_sol: 0,
     claimed_sol: 0,
+    variant,
+    shadow: !!shadow_of,
+    shadow_of,
+    downside_pct: Math.round((1 - 1 / Math.pow(1 + (Number(bin_step) || snap.bin_step) / 10_000, n)) * 1000) / 10,
     opened_at: new Date().toISOString(),
     last_mark_at: Date.now(),
     last: null,
@@ -147,8 +157,86 @@ export async function openPaperPosition({ pool_address, pool_name, strategy, amo
   const d = load();
   d.open[id] = pos;
   save(d);
-  log("paper", `OPEN ${pos.pool_name} ${amount_sol} SOL ${strategy} bins_below=${n} entry=${snap.price_sol.toExponential(4)} SOL/token (${id})`);
+  log("paper", `OPEN${shadow_of ? " [shadow " + variant + "]" : ""} ${pos.pool_name} ${amount_sol} SOL ${strategy} bins_below=${n} (-${pos.downside_pct}%) entry=${snap.price_sol.toExponential(4)} SOL/token (${id})`);
+  if (!shadow_of) await openShadowVariants(pos, snap);
   return pos;
+}
+
+/**
+ * A/B shadows: same pool, same entry price, same size, one per configured variant.
+ * Simulated only. They are hidden from getPaperPositions() (so they never count toward
+ * maxPositions or reach the manager/LLM/lessons) and run their own copy of the exit rules
+ * in markShadows(). Fair comparison: every variant sees the exact same market path.
+ */
+async function openShadowVariants(main, snap) {
+  if (config.paper?.shadowVariants === false) return [];
+  const out = [];
+  for (const v of config.paper?.variants || []) {
+    try {
+      const strategy = v.strategy || main.strategy;
+      const bins = v.downsidePct != null ? binsForDownside(v.downsidePct, main.bin_step) : (v.binsBelow ?? main.bins_below);
+      if (strategy === main.strategy && bins === main.bins_below) continue; // identical to baseline
+      out.push(await openPaperPosition({
+        pool_address: main.pool, pool_name: main.pool_name, strategy, amount_sol: main.amount_sol,
+        bins_below: bins, active_bin: main.entry_active_bin, bin_step: main.bin_step,
+        variant: v.id || `${strategy}_${bins}`, shadow_of: main.position, _snap: snap,
+      }));
+    } catch (e) {
+      log("paper_warn", `shadow ${v.id} failed for ${main.pool_name}: ${e.message}`);
+    }
+  }
+  return out;
+}
+
+/** Same deterministic exit rules as the live manager (index.js getDeterministicCloseRule + trailing TP). */
+function shadowExitReason(pos, row) {
+  const m = config.management;
+  if (row.pnl_pct == null || row.pnl_pct_suspicious) return null;
+  pos.peak_pnl_pct = Math.max(pos.peak_pnl_pct ?? row.pnl_pct, row.pnl_pct);
+  if (row.pnl_pct <= m.stopLossPct) return `Stop loss: PnL ${row.pnl_pct}% <= ${m.stopLossPct}%`;
+  if (row.pnl_pct >= m.takeProfitPct) return `Take profit: PnL ${row.pnl_pct}% >= ${m.takeProfitPct}%`;
+  if (m.trailingTakeProfit && pos.peak_pnl_pct >= m.trailingTriggerPct && pos.peak_pnl_pct - row.pnl_pct >= m.trailingDropPct) {
+    return `Trailing TP: peak ${pos.peak_pnl_pct.toFixed(2)}% → ${row.pnl_pct}%`;
+  }
+  if (row.active_bin > row.upper_bin + m.outOfRangeBinsToClose) return "pumped far above range";
+  if (row.active_bin > row.upper_bin) {
+    pos.oor_since = pos.oor_since || Date.now();
+    if ((Date.now() - pos.oor_since) / 60_000 >= m.outOfRangeWaitMinutes) return "OOR";
+  } else {
+    pos.oor_since = null;
+  }
+  if (row.fee_per_tvl_24h != null && row.fee_per_tvl_24h < m.minFeePerTvl24h && row.age_minutes >= (m.minAgeBeforeYieldCheck ?? 60)) {
+    return "low yield";
+  }
+  return null;
+}
+
+/** Mark shadows and close the ones whose exit rule held for 2 consecutive ticks (like the live poller). */
+let _shadowBusy = false;
+export async function markShadows() {
+  if (_shadowBusy) return { skipped: true };
+  _shadowBusy = true;
+  try { return await _markShadows(); } finally { _shadowBusy = false; }
+}
+async function _markShadows() {
+  const d = load();
+  const shadows = Object.values(d.open).filter((p) => p.shadow);
+  const toClose = [];
+  for (const pos of shadows) {
+    try {
+      const row = await mark(pos);
+      const reason = shadowExitReason(pos, row);
+      if (reason && pos.pending_exit === reason.split(":")[0]) toClose.push([pos.position, reason]);
+      pos.pending_exit = reason ? reason.split(":")[0] : null;
+    } catch (e) {
+      log("paper_warn", `shadow mark failed for ${pos.pool_name} [${pos.variant}]: ${e.message}`);
+    }
+  }
+  const fresh = load();
+  for (const pos of shadows) if (fresh.open[pos.position]) fresh.open[pos.position] = pos;
+  save(fresh);
+  for (const [id, reason] of toClose) await closePaperPosition(id, reason).catch((e) => log("paper_warn", `shadow close failed: ${e.message}`));
+  return { marked: shadows.length, closed: toClose.length };
 }
 
 /** Mark one paper position to market (accrues fees). Returns a getMyPositions-shaped row. */
@@ -203,6 +291,7 @@ export async function getPaperPositions() {
   const d = load();
   const rows = [];
   for (const pos of Object.values(d.open)) {
+    if (pos.shadow) continue; // A/B shadows are invisible to the bot (see markShadows)
     try {
       rows.push(await mark(pos));
     } catch (e) {
@@ -214,7 +303,11 @@ export async function getPaperPositions() {
       });
     }
   }
-  save(d);
+  // merge back only the main positions (markShadows owns the shadow rows)
+  const fresh = load();
+  for (const pos of Object.values(d.open)) if (!pos.shadow && fresh.open[pos.position]) fresh.open[pos.position] = pos;
+  save(fresh);
+  await markShadows().catch((e) => log("paper_warn", `markShadows: ${e.message}`));
   return rows;
 }
 
@@ -333,12 +426,13 @@ export async function closePaperPosition(id, reason) {
 
 export function getPaperSummary() {
   const d = load();
-  const c = d.closed;
+  const c = d.closed.filter((x) => !x.shadow);
   const wins = c.filter((x) => x.pnl_pct > 0).length;
   const sum = (f) => c.reduce((a, x) => a + (Number(f(x)) || 0), 0);
   return {
-    open: Object.keys(d.open).length,
+    open: Object.values(d.open).filter((p) => !p.shadow).length,
     closed: c.length,
+    variants: variantStats(d),
     win_rate_pct: c.length ? Math.round((wins / c.length) * 1000) / 10 : null,
     total_pnl_sol: Math.round(sum((x) => x.final_sol - x.amount_sol) * 1e5) / 1e5,
     avg_pnl_pct: c.length ? Math.round((sum((x) => x.pnl_pct) / c.length) * 100) / 100 : null,
@@ -346,4 +440,28 @@ export function getPaperSummary() {
     total_slippage_sol: Math.round(sum((x) => x.slippage_sol) * 1e5) / 1e5,
     last: c.slice(-5).map((x) => ({ pool: x.pool_name, pnl_pct: Math.round(x.pnl_pct * 100) / 100, held_min: x.minutes_held, reason: x.close_reason })),
   };
+}
+
+export function variantStats(d = load()) {
+  const by = {};
+  const add = (p, closed) => {
+    const k = p.variant || "baseline";
+    const s = (by[k] ||= { variant: k, strategy: p.strategy, open: 0, closed: 0, wins: 0, pnl_sol: 0, pnl_pct_sum: 0, fees_sol: 0, downside_pct: [] });
+    s.downside_pct.push(p.downside_pct ?? null);
+    if (!closed) { s.open++; return; }
+    s.closed++;
+    if (p.pnl_pct > 0) s.wins++;
+    s.pnl_sol += p.final_sol - p.amount_sol;
+    s.pnl_pct_sum += p.pnl_pct;
+    s.fees_sol += p.fees_sol;
+  };
+  Object.values(d.open).forEach((p) => add(p, false));
+  d.closed.forEach((p) => add(p, true));
+  return Object.values(by).map((s) => ({
+    variant: s.variant, strategy: s.strategy, open: s.open, closed: s.closed,
+    win_rate_pct: s.closed ? Math.round((s.wins / s.closed) * 1000) / 10 : null,
+    total_pnl_sol: Math.round(s.pnl_sol * 1e5) / 1e5,
+    avg_pnl_pct: s.closed ? Math.round((s.pnl_pct_sum / s.closed) * 100) / 100 : null,
+    total_fees_sol: Math.round(s.fees_sol * 1e5) / 1e5,
+  }));
 }

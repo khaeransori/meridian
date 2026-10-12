@@ -142,6 +142,7 @@ export function recordPoolDeploy(poolAddress, deployData) {
     exit_mcap: deployData.exit_mcap ?? null,
     exit_tvl: deployData.exit_tvl ?? null,
     exit_volume: deployData.exit_volume ?? null,
+    ...(deployData.paper ? { paper: true } : {}),
   };
 
   entry.deploys.push(deploy);

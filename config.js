@@ -356,6 +356,21 @@ export const config = {
     ),
   },
 
+  // ─── Paper trading A/B (DRY_RUN only) ─────
+  // Each paper deploy also opens "shadow" positions on the same pool at the same
+  // entry, one per variant. Shadows are simulated only, never count toward
+  // maxPositions, never feed lessons, and run their own copy of the exit rules.
+  // downsidePct overrides bins_below (range = entry price down to -downsidePct%).
+  paper: {
+    slippageBps: u.paperSlippageBps ?? 300,
+    shadowVariants: u.paperShadowVariants !== undefined ? u.paperShadowVariants : true,
+    variants: Array.isArray(u.paperVariants) ? u.paperVariants : [
+      { id: "spot",        strategy: "spot" },
+      { id: "wide_bidask", strategy: "bid_ask", downsidePct: 70 },
+      { id: "wide_spot",   strategy: "spot",    downsidePct: 70 },
+    ],
+  },
+
   indicators: {
     enabled: indicatorUserConfig.enabled ?? false,
     entryPreset: indicatorUserConfig.entryPreset ?? "supertrend_break",
