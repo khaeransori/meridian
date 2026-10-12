@@ -25,3 +25,37 @@ Suggested rollout:
 3. Loosen step by step: positions 1 -> 2 -> 3, size 0.5 -> 1 SOL, poller on, stop loss if it cuts too many winners.
 
 Tests (offline, mocked network): `npm run test:hardening && npm run test:gmgn`
+
+## Ported from nightly-2026-04
+
+| Feature | Default | Setting |
+|---|---|---|
+| Stale-position exit: close if older than N min and PnL below X% | 1440 min, 2% | `maxPositionAgeMinutes`, `maxPositionAgePnlPct` (null = off) |
+| OOR-frequency exit: close after N separate out-of-range events | 4 | `oorFrequencyLimit` (null = off) |
+| Volatility-spike exit: close when pool volatility > N× deploy volatility | 3× | `volatilitySpikeRatio` (null = off) |
+| Suspect PnL guard: cache-fallback close PnL is flagged and excluded from lessons, threshold evolution and signal weights | on | — |
+| Stale-lock watchdog: a stuck management/screening cycle is aborted after a timeout so the next one can run | 15 min / 20 min | `managementCycleTimeoutMs`, `screeningCycleTimeoutMs` |
+| Telegram: offset persisted across restarts; in groups only answers when @mentioned or replied to | on | `TELEGRAM_GROUP_MENTION_ONLY=false` to disable |
+| Traxr pool safety score — **log only**, never filters | on | `traxrLogEnabled`; log in `traxr-log.jsonl` |
+| `claude-local` LLM provider (Claude CLI via your subscription) | off | see below |
+
+### claude-local
+
+```json
+{
+  "llmProvider": "claude-local",
+  "claudeLocal": {
+    "models": { "default": "sonnet", "screening": "opus", "management": "sonnet" },
+    "effort": { "default": null, "screening": "high" },
+    "timeoutMs": 240000
+  }
+}
+```
+
+- `llmProvider` can also be per role: `{ "default": "openai", "screening": "claude-local" }`.
+- Models/effort tunable live via Telegram/`update_config`: `claudeLocalModel`, `claudeLocalScreeningModel`, `claudeLocalManagementModel`, `claudeLocalGeneralModel`, `claudeLocalEffort`, `claudeLocalScreeningEffort`, `claudeLocalManagementEffort`.
+- Needs `claude` installed and `claude login` done on the bot machine.
+- Isolation: no built-in Claude Code tools (no shell/file/web), `--strict-mcp-config`, `--setting-sources ""`, temp cwd, wallet/API secrets stripped from the CLI env. Meridian tools are served on 127.0.0.1 (random port) with a per-cycle token and the role's tool allowlist; deploy/swap/close are once-per-cycle like the OpenAI path.
+- Test: `npm run test:claude-local` (live, uses your subscription).
+
+Offline tests: `npm run test:offline` (27 checks).
