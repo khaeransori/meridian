@@ -312,7 +312,7 @@ export const config = {
     // Live position value comes from on-chain reads on this RPC.
     // Defaults to the public pump.helius endpoint so the aggressive poller
     // never burns the main RPC_URL or the LPAgent sponsor budget.
-    rpcUrl: nonEmptyString(u.pnlRpcUrl, process.env.PNL_RPC_URL, "https://pump.helius-rpc.com"),
+    rpcUrl: nonEmptyString(u.pnlRpcUrl, process.env.PNL_RPC_URL, process.env.RPC_URL, "https://pump.helius-rpc.com"),
     source: nonEmptyString(u.pnlSource, "rpc"), // rpc | meteora (fallback-only)
     pollIntervalSec: Number(u.pnlPollIntervalSec ?? 3),
     depositCacheTtlSec: Number(u.pnlDepositCacheTtlSec ?? 300),
