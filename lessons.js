@@ -145,11 +145,17 @@ export async function recordPerformance(perf) {
 
   data.performance.push(entry);
 
-  // Derive and store a lesson
-  const lesson = derivLesson(entry);
-  if (lesson) {
-    data.lessons.push(lesson);
-    log("lessons", `New lesson: ${lesson.rule}`);
+  // Derive and store a lesson — but skip if PnL source is suspect (cache fallback after the
+  // closed-PnL API never settled). Ported from nightly-2026-04.
+  let lesson = null;
+  if (perf.pnl_source_suspect) {
+    log("lessons_warn", `Skipped lesson derivation for ${perf.pool_name || perf.pool} — PnL source flagged suspect`);
+  } else {
+    lesson = derivLesson(entry);
+    if (lesson) {
+      data.lessons.push(lesson);
+      log("lessons", `New lesson: ${lesson.rule}`);
+    }
   }
 
   save(data);
@@ -332,6 +338,8 @@ function derivLesson(perf) {
  */
 export function evolveThresholds(perfData, config) {
   if (!perfData || perfData.length < MIN_EVOLVE_POSITIONS) return null;
+  perfData = perfData.filter((p) => !p.pnl_source_suspect); // exclude cache-fallback records
+  if (perfData.length < MIN_EVOLVE_POSITIONS) return null;
 
   const winners = perfData.filter((p) => p.pnl_pct > 0);
   const losers  = perfData.filter((p) => p.pnl_pct < -5);

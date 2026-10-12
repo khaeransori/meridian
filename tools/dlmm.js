@@ -1624,6 +1624,7 @@ export async function closePosition({ position_address, reason }) {
         let finalValueUsd = 0;
         let initialUsd = 0;
         let feesUsd = tracked.total_fees_claimed_usd || 0;
+        let relayPnlSettled = false;
         try {
           const closedUrl = `https://dlmm.datapi.meteora.ag/positions/${poolAddress}/pnl?user=${wallet.publicKey.toString()}&status=closed&pageSize=50&page=1`;
           for (let attempt = 0; attempt < 6; attempt++) {
@@ -1638,6 +1639,7 @@ export async function closePosition({ position_address, reason }) {
                 finalValueUsd = parseFloat(posEntry.allTimeWithdrawals?.total?.usd || 0);
                 initialUsd = parseFloat(posEntry.allTimeDeposits?.total?.usd || 0);
                 feesUsd = parseFloat(posEntry.allTimeFees?.total?.usd || 0) || feesUsd;
+                relayPnlSettled = true;
                 break;
               }
             }
@@ -1692,6 +1694,7 @@ export async function closePosition({ position_address, reason }) {
           entry_volume: tracked.entry_volume ?? null,
           entry_holders: tracked.entry_holders ?? null,
           ...exitMarket,
+          pnl_source_suspect: !relayPnlSettled,
         });
 
         appendDecision({
@@ -1932,8 +1935,12 @@ export async function closePosition({ position_address, reason }) {
       } catch (e) {
         log("close_warn", `Closed PnL fetch failed: ${e.message}`);
       }
-      // Fallback to pre-close cache snapshot if closed API had no data
+      // Fallback to pre-close cache snapshot if closed API had no data.
+      // Ported from nightly-2026-04: mark such records SUSPECT — mid-flight cached PnL can be
+      // wildly wrong (a phantom -75% on a real +1% win) and must not poison learning.
+      let pnlSourceSuspect = false;
       if (finalValueUsd === 0) {
+        pnlSourceSuspect = true;
         const cachedPos = _positionsCache?.positions?.find(p => p.position === position_address);
         if (cachedPos) {
           pnlTrueUsd    = cachedPos.pnl_true_usd ?? (config.management.solMode ? 0 : cachedPos.pnl_usd) ?? 0;
@@ -1949,7 +1956,7 @@ export async function closePosition({ position_address, reason }) {
             finalValueUsd = cachedPos.total_value_true_usd ?? cachedPos.total_value_usd ?? 0;
             initialUsd = Math.max(0, finalValueUsd + feesUsd - pnlTrueUsd);
           }
-          log("close_warn", `Using cached pnl fallback because closed API has not settled yet`);
+          log("close_warn", `Using cached pnl fallback because closed API has not settled yet (SUSPECT — excluded from lessons/evolution)`);
         }
       }
 
@@ -1997,6 +2004,7 @@ export async function closePosition({ position_address, reason }) {
         entry_volume: tracked.entry_volume ?? null,
         entry_holders: tracked.entry_holders ?? null,
         ...exitMarket,
+        pnl_source_suspect: pnlSourceSuspect,
       });
 
       appendDecision({

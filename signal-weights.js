@@ -118,7 +118,7 @@ export function recalculateWeights(perfData, cfg = {}) {
   cutoff.setDate(cutoff.getDate() - windowDays);
   const cutoffISO = cutoff.toISOString();
 
-  const recent = perfData.filter((p) => {
+  const recent = perfData.filter((p) => !p.pnl_source_suspect).filter((p) => {
     const ts = p.recorded_at || p.closed_at || p.deployed_at;
     return ts && ts >= cutoffISO;
   });
