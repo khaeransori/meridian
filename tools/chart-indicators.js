@@ -202,7 +202,7 @@ function evaluatePreset(side, preset, payload) {
   }
 }
 
-async function fetchChartIndicatorsForMint(
+export async function fetchChartIndicatorsForMint(
   mint,
   {
     interval,

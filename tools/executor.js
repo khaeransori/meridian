@@ -216,8 +216,20 @@ function normalizeConfigValue(key, value) {
     "solMode",
     "darwinEnabled",
     "lpAgentRelayEnabled",
+    "gmgnRequireKol",
+    "gmgnIndicatorFilter",
+    "gmgnRequireBullishSt",
+    "gmgnRejectAtBottom",
+    "gmgnRequireAboveSt",
   ]);
-  const arrayKeys = new Set(["allowedLaunchpads", "blockedLaunchpads"]);
+  const arrayKeys = new Set([
+    "allowedLaunchpads",
+    "blockedLaunchpads",
+    "gmgnFilters",
+    "gmgnPlatforms",
+    "gmgnPreferredKolNames",
+    "gmgnDumpKolNames",
+  ]);
   const stringKeys = new Set([
     "timeframe",
     "category",
@@ -236,12 +248,48 @@ function normalizeConfigValue(key, value) {
     "pnlRpcUrl",
     "gmgnFeeSource",
     "gmgnApiKey",
+    "gmgnBaseUrl",
+    "gmgnInterval",
+    "gmgnOrderBy",
+    "gmgnDirection",
+    "gmgnIndicatorInterval",
   ]);
+  const enumKeys = {
+    screeningSource: ["meteora", "gmgn"],
+    gmgnFeeSource: ["gmgn", "jupiter"],
+    gmgnInterval: ["1m", "5m", "1h", "6h", "24h"],
+    gmgnDirection: ["asc", "desc"],
+    gmgnIndicatorInterval: ["5_MINUTE", "15_MINUTE", "1h", "1H"],
+  };
+  if (enumKeys[key]) {
+    const str = coerceString(value, key);
+    if (!enumKeys[key].includes(str)) throw new Error(`${key} must be one of: ${enumKeys[key].join(", ")}`);
+    return str;
+  }
   if (value === null) return null;
   if (booleanKeys.has(key)) return coerceBoolean(value, key);
   if (arrayKeys.has(key)) return coerceStringArray(value, key);
   if (stringKeys.has(key)) return coerceString(value, key);
   return coerceFiniteNumber(value, key);
+}
+
+const GMGN_CONFIG_PATH = repoPath("gmgn-config.json");
+const SENSITIVE_CONFIG_KEYS = new Set([
+  "gmgnApiKey",
+  "hiveMindApiKey",
+  "publicApiKey",
+  "llmApiKey",
+]);
+
+function redactConfigValue(key, value) {
+  if (!SENSITIVE_CONFIG_KEYS.has(key)) return value;
+  return typeof value === "string" && value ? "***redacted***" : value;
+}
+
+function redactAppliedConfig(applied) {
+  return Object.fromEntries(
+    Object.entries(applied || {}).map(([key, value]) => [key, redactConfigValue(key, value)]),
+  );
 }
 
 // Map tool names to implementations
@@ -344,6 +392,7 @@ const toolMap = {
     // Flat key → config section mapping (covers everything in config.js)
     const CONFIG_MAP = {
       // screening
+      screeningSource: ["screening", "source"],
       minFeeActiveTvlRatio: ["screening", "minFeeActiveTvlRatio"],
       excludeHighSupplyConcentration: ["screening", "excludeHighSupplyConcentration"],
       minTvl: ["screening", "minTvl"],
@@ -445,8 +494,50 @@ const toolMap = {
       pnlRpcUrl: ["pnl", "rpcUrl", ["pnlRpcUrl"]],
       pnlPollIntervalSec: ["pnl", "pollIntervalSec", ["pnlPollIntervalSec"]],
       pnlDepositCacheTtlSec: ["pnl", "depositCacheTtlSec", ["pnlDepositCacheTtlSec"]],
-      // gmgn fee source
-      gmgnFeeSource: ["gmgn", "feeSource", ["gmgnFeeSource"]],
+      // GMGN (persisted to gmgn-config.json; "gmgn:" prefix marks the target file)
+      gmgnFeeSource: ["gmgn", "feeSource", ["gmgn:feeSource"]],
+      gmgnBaseUrl: ["gmgn", "baseUrl", ["gmgn:baseUrl"]],
+      gmgnInterval: ["gmgn", "interval", ["gmgn:interval"]],
+      gmgnOrderBy: ["gmgn", "orderBy", ["gmgn:orderBy"]],
+      gmgnDirection: ["gmgn", "direction", ["gmgn:direction"]],
+      gmgnLimit: ["gmgn", "limit", ["gmgn:limit"]],
+      gmgnEnrichLimit: ["gmgn", "enrichLimit", ["gmgn:enrichLimit"]],
+      gmgnRequestDelayMs: ["gmgn", "requestDelayMs", ["gmgn:requestDelayMs"]],
+      gmgnMaxRetries: ["gmgn", "maxRetries", ["gmgn:maxRetries"]],
+      gmgnHoldersLimit: ["gmgn", "holdersLimit", ["gmgn:holdersLimit"]],
+      gmgnFilters: ["gmgn", "filters", ["gmgn:filters"]],
+      gmgnPlatforms: ["gmgn", "platforms", ["gmgn:platforms"]],
+      gmgnMinMcap: ["gmgn", "minMcap", ["gmgn:minMcap"]],
+      gmgnMaxMcap: ["gmgn", "maxMcap", ["gmgn:maxMcap"]],
+      gmgnMinTvl: ["gmgn", "minTvl", ["gmgn:minTvl"]],
+      gmgnMinVolume: ["gmgn", "minVolume", ["gmgn:minVolume"]],
+      gmgnMinHolders: ["gmgn", "minHolders", ["gmgn:minHolders"]],
+      gmgnMinTokenAgeHours: ["gmgn", "minTokenAgeHours", ["gmgn:minTokenAgeHours"]],
+      gmgnMaxTokenAgeHours: ["gmgn", "maxTokenAgeHours", ["gmgn:maxTokenAgeHours"]],
+      gmgnAthFilterPct: ["gmgn", "athFilterPct", ["gmgn:athFilterPct"]],
+      gmgnMaxTop10HolderRate: ["gmgn", "maxTop10HolderRate", ["gmgn:maxTop10HolderRate"]],
+      gmgnMaxBundlerRate: ["gmgn", "maxBundlerRate", ["gmgn:maxBundlerRate"]],
+      gmgnMaxRatTraderRate: ["gmgn", "maxRatTraderRate", ["gmgn:maxRatTraderRate"]],
+      gmgnMaxFreshWalletRate: ["gmgn", "maxFreshWalletRate", ["gmgn:maxFreshWalletRate"]],
+      gmgnMaxDevTeamHoldRate: ["gmgn", "maxDevTeamHoldRate", ["gmgn:maxDevTeamHoldRate"]],
+      gmgnMaxBotDegenRate: ["gmgn", "maxBotDegenRate", ["gmgn:maxBotDegenRate"]],
+      gmgnMaxSniperCount: ["gmgn", "maxSniperCount", ["gmgn:maxSniperCount"]],
+      gmgnMaxSniperHoldRate: ["gmgn", "maxSniperHoldRate", ["gmgn:maxSniperHoldRate"]],
+      gmgnPreferredKolNames: ["gmgn", "preferredKolNames", ["gmgn:preferredKolNames"]],
+      gmgnPreferredKolMinHoldPct: ["gmgn", "preferredKolMinHoldPct", ["gmgn:preferredKolMinHoldPct"]],
+      gmgnDumpKolNames: ["gmgn", "dumpKolNames", ["gmgn:dumpKolNames"]],
+      gmgnDumpKolMinHoldPct: ["gmgn", "dumpKolMinHoldPct", ["gmgn:dumpKolMinHoldPct"]],
+      gmgnRequireKol: ["gmgn", "requireKol", ["gmgn:requireKol"]],
+      gmgnMinKolCount: ["gmgn", "minKolCount", ["gmgn:minKolCount"]],
+      gmgnMinSmartDegenCount: ["gmgn", "minSmartDegenCount", ["gmgn:minSmartDegenCount"]],
+      gmgnMinTotalFeeSol: ["gmgn", "minTotalFeeSol", ["gmgn:minTotalFeeSol"]],
+      gmgnIndicatorFilter: ["gmgn", "indicatorFilter", ["gmgn:indicatorFilter"]],
+      gmgnIndicatorInterval: ["gmgn", "indicatorInterval", ["gmgn:indicatorInterval"]],
+      gmgnRequireBullishSt: ["gmgn", "indicatorRules.requireBullishSupertrend", ["gmgn:indicatorRules", "requireBullishSupertrend"]],
+      gmgnRejectAtBottom: ["gmgn", "indicatorRules.rejectAlreadyAtBottom", ["gmgn:indicatorRules", "rejectAlreadyAtBottom"]],
+      gmgnRequireAboveSt: ["gmgn", "indicatorRules.requireAboveSupertrend", ["gmgn:indicatorRules", "requireAboveSupertrend"]],
+      gmgnMinRsi: ["gmgn", "indicatorRules.minRsi", ["gmgn:indicatorRules", "minRsi"]],
+      gmgnMaxRsi: ["gmgn", "indicatorRules.maxRsi", ["gmgn:indicatorRules", "maxRsi"]],
       gmgnApiKey: ["gmgn", "apiKey", ["gmgnApiKey"]],
       // chart indicators
       chartIndicatorsEnabled: ["indicators", "enabled", ["chartIndicators", "enabled"]],
@@ -522,9 +613,16 @@ const toolMap = {
     for (const [key, val] of Object.entries(applied)) {
       if (key.startsWith("_")) continue;
       const [section, field] = CONFIG_MAP[key];
-      const before = config[section][field];
-      config[section][field] = val;
-      log("config", `update_config: config.${section}.${field} ${before} → ${val} (verify: ${config[section][field]})`);
+      const fieldPath = field.split(".");
+      let target = config[section];
+      for (const part of fieldPath.slice(0, -1)) {
+        if (!target[part] || typeof target[part] !== "object") target[part] = {};
+        target = target[part];
+      }
+      const leaf = fieldPath[fieldPath.length - 1];
+      const before = target[leaf];
+      target[leaf] = val;
+      log("config", `update_config: config.${section}.${field} ${redactConfigValue(key, before)} → ${redactConfigValue(key, val)}`);
     }
     if (
       applied.binsBelow != null ||
@@ -543,9 +641,29 @@ const toolMap = {
       );
     }
 
+    let gmgnConfig = {};
+    let wroteGmgnConfig = false;
+    if (fs.existsSync(GMGN_CONFIG_PATH)) {
+      try {
+        gmgnConfig = JSON.parse(fs.readFileSync(GMGN_CONFIG_PATH, "utf8"));
+      } catch (error) {
+        return { success: false, error: `Invalid gmgn-config.json: ${error.message}`, reason };
+      }
+    }
     for (const [key, val] of Object.entries(applied)) {
       if (key.startsWith("_")) continue;
       const persistPath = CONFIG_MAP[key]?.[2];
+      if (Array.isArray(persistPath) && String(persistPath[0]).startsWith("gmgn:")) {
+        const gmgnPath = [String(persistPath[0]).slice(5), ...persistPath.slice(1)];
+        let target = gmgnConfig;
+        for (const part of gmgnPath.slice(0, -1)) {
+          if (!target[part] || typeof target[part] !== "object" || Array.isArray(target[part])) target[part] = {};
+          target = target[part];
+        }
+        target[gmgnPath[gmgnPath.length - 1]] = val;
+        wroteGmgnConfig = true;
+        continue;
+      }
       if (Array.isArray(persistPath) && persistPath.length > 0) {
         let target = userConfig;
         for (const part of persistPath.slice(0, -1)) {
@@ -561,6 +679,9 @@ const toolMap = {
     }
     userConfig._lastAgentTune = new Date().toISOString();
     fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(userConfig, null, 2));
+    if (wroteGmgnConfig) {
+      fs.writeFileSync(GMGN_CONFIG_PATH, JSON.stringify(gmgnConfig, null, 2));
+    }
 
     // Restart cron jobs if intervals changed
     const intervalChanged = applied.managementIntervalMin != null || applied.screeningIntervalMin != null || applied.pnlPollIntervalSec != null;
@@ -574,12 +695,12 @@ const toolMap = {
       k => !k.startsWith("_") && k !== "managementIntervalMin" && k !== "screeningIntervalMin"
     );
     if (lessonsKeys.length > 0) {
-      const summary = lessonsKeys.map(k => `${k}=${applied[k]}`).join(", ");
+      const summary = lessonsKeys.map(k => `${k}=${redactConfigValue(k, applied[k])}`).join(", ");
       addLesson(`[SELF-TUNED] Changed ${summary} — ${reason}`, ["self_tune", "config_change"]);
     }
 
-    log("config", `Agent self-tuned: ${JSON.stringify(applied)} — ${reason}`);
-    return { success: true, applied, unknown, reason };
+    log("config", `Agent self-tuned: ${JSON.stringify(redactAppliedConfig(applied))} — ${reason}`);
+    return { success: true, applied: redactAppliedConfig(applied), unknown, reason };
   },
 };
 

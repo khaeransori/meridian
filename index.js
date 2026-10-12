@@ -8,6 +8,7 @@ import { log } from "./logger.js";
 import { getMyPositions, closePosition, getActiveBin } from "./tools/dlmm.js";
 import { getWalletBalances } from "./tools/wallet.js";
 import { getTopCandidates, degenScore } from "./tools/screening.js";
+import { formatGmgnCandidateForPrompt } from "./tools/gmgn.js";
 import { config, reloadScreeningThresholds, computeDeployAmount } from "./config.js";
 import { evolveThresholds, getPerformanceSummary } from "./lessons.js";
 import { executeTool, registerCronRestarter } from "./tools/executor.js";
@@ -421,9 +422,21 @@ export async function runScreeningCycle({ silent = false } = {}) {
       + (activeStrategy ? `\nSTRATEGY CONTEXT: ${activeStrategy.name} — entry: ${activeStrategy.entry?.condition || "n/a"} | exit: ${activeStrategy.exit?.notes || "n/a"} | best for: ${activeStrategy.best_for}` : "");
 
     // Fetch top candidates, then recon each sequentially with a small delay to avoid 429s
-    const topCandidates = await getTopCandidates({ limit: 10 }).catch(() => null);
+    const topCandidates = await getTopCandidates({ limit: 10 }).catch((e) => ({ _error: e.message }));
+    if (topCandidates?._error) {
+      screenReport = `Screening failed: ${topCandidates._error}`;
+      appendDecision({
+        type: "no_deploy",
+        actor: "SCREENER",
+        summary: "Screening failed",
+        reason: topCandidates._error,
+      });
+      return screenReport;
+    }
     const candidates = (topCandidates?.candidates || topCandidates?.pools || []).slice(0, 10);
     const earlyFilteredExamples = topCandidates?.filtered_examples || [];
+    const gmgnStageCounts = topCandidates?.stage_counts ?? null;
+    const gmgnAllFiltered = topCandidates?.all_filtered ?? [];
 
     const allCandidates = [];
     for (const pool of candidates) {
@@ -469,26 +482,36 @@ export async function runScreeningCycle({ silent = false } = {}) {
 
     if (passing.length === 0) {
       const combined = filteredOut.length > 0 ? filteredOut : earlyFilteredExamples;
-      const combinedExamples = combined.slice(0, 3)
+      const combinedExamples = combined.slice(0, 5)
         .map((entry) => `- ${entry.name}: ${entry.reason}`)
         .join("\n");
-      screenReport = combinedExamples
-        ? `No candidates available.\nFiltered examples:\n${combinedExamples}`
-        : `No candidates available (all filtered by launchpad / holder-quality rules).`;
+      const funnelBlock = buildGmgnFunnelReport(gmgnStageCounts, gmgnAllFiltered, { fromStage: 2 });
+      const thresholds = `Thresholds: tvl>$${config.screening.minTvl} | vol>$${config.screening.minVolume} | organic>${config.screening.minOrganic}% | holders>${config.screening.minHolders} | fee/tvl>${config.screening.minFeeActiveTvlRatio}%`;
+      screenReport = funnelBlock
+        ? `No candidates available.\n\n${funnelBlock}`
+        : combinedExamples
+          ? `No candidates available.\nFiltered examples:\n${combinedExamples}`
+          : `No candidates available (all filtered).\n${thresholds}`;
       appendDecision({
         type: "no_deploy",
         actor: "SCREENER",
         summary: "No candidates available",
-        reason: combinedExamples || "All candidates filtered before deploy",
+        reason: funnelBlock || combinedExamples || "All candidates filtered before deploy",
         rejected: combined.slice(0, 5).map((entry) => `${entry.name}: ${entry.reason}`),
       });
       return screenReport;
+    }
+
+    if (passing.length <= 1 && gmgnStageCounts) {
+      const funnelBlock = buildGmgnFunnelReport(gmgnStageCounts, gmgnAllFiltered, { fromStage: 2 });
+      if (funnelBlock) log("screening", `GMGN funnel (sparse):\n${funnelBlock}`);
     }
 
     if (passing.length === 1) {
       const skipReason = getLoneCandidateSkipReason(passing[0]);
       if (skipReason) {
         const candidateName = passing[0].pool?.name || "unknown";
+        const funnelBlock = buildGmgnFunnelReport(gmgnStageCounts, gmgnAllFiltered, { fromStage: 2 });
         screenReport = [
           "⛔ NO DEPLOY",
           "",
@@ -502,7 +525,8 @@ export async function runScreeningCycle({ silent = false } = {}) {
           "",
           "REJECTED",
           `- ${candidateName}: ${skipReason}`,
-        ].join("\n");
+          funnelBlock ? `\n─────────────\n${funnelBlock}` : null,
+        ].filter(Boolean).join("\n");
         appendDecision({
           type: "no_deploy",
           actor: "SCREENER",
@@ -534,7 +558,20 @@ export async function runScreeningCycle({ silent = false } = {}) {
         ? `  pvp: HIGH — rival ${pool.pvp_rival_name || pool.pvp_symbol} (${pool.pvp_rival_mint?.slice(0, 8)}...) has pool ${pool.pvp_rival_pool?.slice(0, 8)}..., tvl=$${pool.pvp_rival_tvl}, holders=${pool.pvp_rival_holders}, fees=${pool.pvp_rival_fees}SOL`
         : null;
 
-      const block = [
+      let block;
+      if (pool.gmgn) {
+        block = [
+          `POOL: ${pool.name} (${pool.pool})`,
+          formatGmgnCandidateForPrompt(pool),
+          `  audit_jupiter: top10=${top10Pct}%, bots=${botPct}%, fees=${feesSol}SOL${launchpad ? `, launchpad=${launchpad}` : ""}`,
+          pvpLine,
+          `  smart_wallets: ${sw?.in_pool?.length ?? 0} present${sw?.in_pool?.length ? ` → CONFIDENCE BOOST (${sw.in_pool.map(w => w.name).join(", ")})` : ""}`,
+          activeBin != null ? `  active_bin: ${activeBin}` : null,
+          n?.narrative ? `  narrative_untrusted: ${sanitizeUntrustedPromptText(n.narrative, 500)}` : `  narrative_untrusted: none`,
+          mem ? `  memory_untrusted: ${sanitizeUntrustedPromptText(mem, 500)}` : null,
+        ].filter(Boolean).join("\n");
+      } else {
+        block = [
         `POOL: ${pool.name} (${pool.pool})`,
         `  metrics: bin_step=${pool.bin_step}, fee_pct=${pool.fee_pct}%, fee_tvl=${pool.fee_active_tvl_ratio}, vol=$${pool.volume_window}, tvl=$${pool.tvl ?? pool.active_tvl}, volatility_${pool.volatility_timeframe || "30m"}=${pool.volatility}, mcap=$${pool.mcap}, organic=${pool.organic_score}${pool.token_age_hours != null ? `, age=${pool.token_age_hours}h` : ""}`,
         `  audit: top10=${top10Pct}%, bots=${botPct}%, fees=${feesSol}SOL${launchpad ? `, launchpad=${launchpad}` : ""}`,
@@ -545,6 +582,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
         n?.narrative ? `  narrative_untrusted: ${sanitizeUntrustedPromptText(n.narrative, 500)}` : `  narrative_untrusted: none`,
         mem ? `  memory_untrusted: ${sanitizeUntrustedPromptText(mem, 500)}` : null,
       ].filter(Boolean).join("\n");
+      }
 
       // Stage signals for Darwinian weighting — captured before LLM decides
       if (config.darwin?.enabled) {
@@ -647,7 +685,8 @@ IMPORTANT:
           await liveMessage?.toolFinish(name, result, success);
         },
       });
-    screenReport = content;
+    const funnelAppend = buildGmgnFunnelReport(gmgnStageCounts, gmgnAllFiltered, { fromStage: 2 });
+    screenReport = funnelAppend ? `${content}\n\n─────────────\n${funnelAppend}` : content;
     if (/⛔\s*NO DEPLOY/i.test(content)) {
       appendDecision({
         type: "no_deploy",
@@ -954,6 +993,7 @@ const MAX_HISTORY = 20;    // keep last 20 messages (10 exchanges)
 let _ttyInterface = null;
 let _latestCandidates = [];
 let _latestCandidatesAt = null;
+let _pendingInput = null; // { key, page, menuMsgId, expiresAt }
 
 function setLatestCandidates(candidates = []) {
   _latestCandidates = Array.isArray(candidates) ? candidates : [];
@@ -1006,6 +1046,8 @@ function formatConfigSnapshot() {
     `Repeat deploy cooldown: ${config.management.repeatDeployCooldownEnabled ? "on" : "off"} | ${config.management.repeatDeployCooldownTriggerCount}x / ${config.management.repeatDeployCooldownHours}h | min fee earned ${config.management.repeatDeployCooldownMinFeeEarnedPct}% | ${config.management.repeatDeployCooldownScope}`,
     `Yield floor: ${config.management.minFeePerTvl24h}% | min age ${config.management.minAgeBeforeYieldCheck}m`,
     `Screening: ${config.screening.category} / ${config.screening.timeframe} | TVL ${config.screening.minTvl}-${config.screening.maxTvl}`,
+    `Screening source: ${config.screening.source} | GMGN key: ${config.gmgn.apiKey ? "set" : "missing"}`,
+    `GMGN: interval ${config.gmgn.interval} | order ${config.gmgn.orderBy}/${config.gmgn.direction} | KOL ${config.gmgn.requireKol ? "required" : "preferred"} | indicators ${config.gmgn.indicatorFilter ? "on" : "off"}`,
     `Intervals: manage ${config.schedule.managementIntervalMin}m | screen ${config.schedule.screeningIntervalMin}m`,
     `HiveMind: ${isHiveMindEnabled() ? "enabled" : "disabled"}${config.hiveMind.agentId ? ` | ${config.hiveMind.agentId}` : ""}`,
   ].join("\n");
@@ -1031,6 +1073,27 @@ function settingValue(key) {
     trailingTakeProfit: config.management.trailingTakeProfit,
     useDiscordSignals: config.screening.useDiscordSignals,
     blockPvpSymbols: config.screening.blockPvpSymbols,
+    screeningSource: config.screening.source,
+    gmgnRequireKol: config.gmgn.requireKol,
+    gmgnInterval: config.gmgn.interval,
+    gmgnIndicatorFilter: config.gmgn.indicatorFilter,
+    gmgnIndicatorInterval: config.gmgn.indicatorInterval,
+    gmgnRequireBullishSt: config.gmgn.indicatorRules?.requireBullishSupertrend,
+    gmgnRejectAtBottom: config.gmgn.indicatorRules?.rejectAlreadyAtBottom,
+    gmgnRequireAboveSt: config.gmgn.indicatorRules?.requireAboveSupertrend,
+    gmgnMinRsi: config.gmgn.indicatorRules?.minRsi,
+    gmgnMaxRsi: config.gmgn.indicatorRules?.maxRsi,
+    gmgnMinVolume: config.gmgn.minVolume,
+    gmgnMinHolders: config.gmgn.minHolders,
+    gmgnMinTokenAgeHours: config.gmgn.minTokenAgeHours,
+    gmgnMaxTokenAgeHours: config.gmgn.maxTokenAgeHours,
+    gmgnMaxBundlerRate: config.gmgn.maxBundlerRate,
+    gmgnMinKolCount: config.gmgn.minKolCount,
+    gmgnMinTotalFeeSol: config.gmgn.minTotalFeeSol,
+    gmgnPreferredKolNames: config.gmgn.preferredKolNames,
+    gmgnPreferredKolMinHoldPct: config.gmgn.preferredKolMinHoldPct,
+    gmgnDumpKolNames: config.gmgn.dumpKolNames,
+    gmgnDumpKolMinHoldPct: config.gmgn.dumpKolMinHoldPct,
     strategy: config.strategy.strategy,
     minBinsBelow: config.strategy.minBinsBelow,
     maxBinsBelow: config.strategy.maxBinsBelow,
@@ -1082,6 +1145,28 @@ function stepButtons(key, label, step, { digits = 2 } = {}) {
   ];
 }
 
+const LIST_INPUT_KEYS = new Set(["gmgnPreferredKolNames", "gmgnDumpKolNames"]);
+const KOL_PAGE_KEYS = new Set(["gmgnPreferredKolNames", "gmgnPreferredKolMinHoldPct", "gmgnDumpKolNames", "gmgnDumpKolMinHoldPct"]);
+
+function inputButton(key, label, { digits = 2 } = {}) {
+  const value = settingValue(key);
+  let shown;
+  if (value == null) shown = "off";
+  else if (Array.isArray(value)) shown = value.length ? value.join(",") : "(none)";
+  else if (typeof value === "number") shown = String(parseFloat(value.toFixed(digits)));
+  else shown = fmtSettingValue(value);
+  if (shown.length > 40) shown = `${shown.slice(0, 37)}...`;
+  return [settingButton(`${label}: ${shown} ✏`, `cfg:input:${key}`)];
+}
+
+function settingsPageForKey(key) {
+  if (KOL_PAGE_KEYS.has(key)) return "kol";
+  if (key === "screeningSource" || key.startsWith("gmgn")) return "gmgn";
+  if (key.startsWith("indicator") || key === "chartIndicatorsEnabled" || key === "rsiLength" || key === "requireAllIntervals") return "indicators";
+  if (["useDiscordSignals", "blockPvpSymbols", "strategy", "minBinsBelow", "maxBinsBelow", "defaultBinsBelow", "managementIntervalMin", "screeningIntervalMin"].includes(key)) return "screen";
+  return "risk";
+}
+
 function renderSettingsMenu(page = "main") {
   const title = page === "main" ? "Settings menu" : `Settings: ${page}`;
   const summary = [
@@ -1089,6 +1174,7 @@ function renderSettingsMenu(page = "main") {
     "",
     `Mode: ${config.management.solMode ? "SOL" : "USD"} | Relay: ${config.api.lpAgentRelayEnabled ? "on" : "off"}`,
     `Strategy: ${config.strategy.strategy} | bins ${config.strategy.minBinsBelow}-${config.strategy.maxBinsBelow} | deploy ${config.management.deployAmountSol} SOL`,
+    `Screening: ${config.screening.source}${config.screening.source === "gmgn" ? ` | KOL ${config.gmgn.requireKol ? "required" : "preferred"}${config.gmgn.apiKey ? "" : " | ⚠ GMGN key missing"}` : ""}`,
     `TP/SL: ${config.management.takeProfitPct}% / ${config.management.stopLossPct}% | trailing ${config.management.trailingTakeProfit ? "on" : "off"}`,
     `Indicators: ${config.indicators.enabled ? "on" : "off"} | entry ${config.indicators.entryPreset} | ${fmtSettingValue(config.indicators.intervals)}`,
   ].join("\n");
@@ -1099,6 +1185,10 @@ function renderSettingsMenu(page = "main") {
       settingButton("Risk", "cfg:page:risk"),
       settingButton("Screen", "cfg:page:screen"),
       settingButton("Indicators", "cfg:page:indicators"),
+    ],
+    [
+      settingButton("GMGN", "cfg:page:gmgn"),
+      settingButton("KOL", "cfg:page:kol"),
     ],
   ];
 
@@ -1138,6 +1228,42 @@ function renderSettingsMenu(page = "main") {
       stepButtons("defaultBinsBelow", "Default bins", 1, { digits: 0 }),
       stepButtons("managementIntervalMin", "Manage min", 1, { digits: 0 }),
       stepButtons("screeningIntervalMin", "Screen min", 5, { digits: 0 }),
+    ];
+  } else if (page === "gmgn") {
+    rows = [
+      [
+        settingButton("Source: Meteora", "cfg:set:screeningSource:meteora"),
+        settingButton("Source: GMGN", "cfg:set:screeningSource:gmgn"),
+      ],
+      [toggleButton("gmgnRequireKol", "Require KOL"), toggleButton("gmgnIndicatorFilter", "Indicator filter")],
+      [
+        settingButton("Rank 5m", "cfg:set:gmgnInterval:5m"),
+        settingButton("1h", "cfg:set:gmgnInterval:1h"),
+        settingButton("6h", "cfg:set:gmgnInterval:6h"),
+        settingButton("24h", "cfg:set:gmgnInterval:24h"),
+      ],
+      [
+        settingButton("Ind 5m", "cfg:set:gmgnIndicatorInterval:5_MINUTE"),
+        settingButton("Ind 15m", "cfg:set:gmgnIndicatorInterval:15_MINUTE"),
+      ],
+      [toggleButton("gmgnRequireBullishSt", "Bullish ST"), toggleButton("gmgnRejectAtBottom", "Reject bottom")],
+      [toggleButton("gmgnRequireAboveSt", "Above ST")],
+      inputButton("gmgnMinRsi", "Min RSI", { digits: 0 }),
+      inputButton("gmgnMaxRsi", "Max RSI", { digits: 0 }),
+      inputButton("gmgnMinVolume", "Min volume $", { digits: 0 }),
+      inputButton("gmgnMinHolders", "Min holders", { digits: 0 }),
+      inputButton("gmgnMinTokenAgeHours", "Min age h", { digits: 1 }),
+      inputButton("gmgnMaxTokenAgeHours", "Max age h", { digits: 0 }),
+      inputButton("gmgnMaxBundlerRate", "Max bundler (0-1)", { digits: 2 }),
+      inputButton("gmgnMinKolCount", "Min KOL", { digits: 0 }),
+      inputButton("gmgnMinTotalFeeSol", "Min fee SOL", { digits: 0 }),
+    ];
+  } else if (page === "kol") {
+    rows = [
+      inputButton("gmgnPreferredKolNames", "Preferred KOLs"),
+      inputButton("gmgnPreferredKolMinHoldPct", "Preferred min hold %", { digits: 2 }),
+      inputButton("gmgnDumpKolNames", "Dump KOLs"),
+      inputButton("gmgnDumpKolMinHoldPct", "Dump min hold %", { digits: 2 }),
     ];
   } else if (page === "indicators") {
     rows = [
@@ -1204,6 +1330,21 @@ async function applySettingsMenuCallback(msg) {
     await answerCallbackQuery(msg.callbackQueryId);
     return;
   }
+  if (action === "input") {
+    const inputKey = parts[2];
+    if (!inputKey) {
+      await answerCallbackQuery(msg.callbackQueryId, "Invalid setting");
+      return;
+    }
+    _pendingInput = { key: inputKey, page: settingsPageForKey(inputKey), menuMsgId: msg.messageId, expiresAt: Date.now() + 5 * 60_000 };
+    await answerCallbackQuery(msg.callbackQueryId);
+    const current = fmtSettingValue(settingValue(inputKey) ?? "off");
+    const hint = LIST_INPUT_KEYS.has(inputKey)
+      ? `Send a comma-separated list of names, or "none" to clear.`
+      : `Send a number, or "off" to clear.`;
+    await sendMessage(`Enter new value for ${inputKey} (current: ${current}).\n${hint}\nSend /cancel to abort.`);
+    return;
+  }
   if (action === "close") {
     await answerCallbackQuery(msg.callbackQueryId, "Closed");
     await editMessage("Settings menu closed.", msg.messageId);
@@ -1255,11 +1396,7 @@ async function applySettingsMenuCallback(msg) {
     await answerCallbackQuery(msg.callbackQueryId, "Config update failed");
     return;
   }
-  page = key.startsWith("indicator") || key === "chartIndicatorsEnabled" || key === "rsiLength" || key === "requireAllIntervals"
-    ? "indicators"
-    : ["useDiscordSignals", "blockPvpSymbols", "strategy", "minBinsBelow", "maxBinsBelow", "defaultBinsBelow", "managementIntervalMin", "screeningIntervalMin"].includes(key)
-      ? "screen"
-      : "risk";
+  page = settingsPageForKey(key);
   await answerCallbackQuery(msg.callbackQueryId, `Updated ${key}`);
   await showSettingsMenu({ messageId: msg.messageId, page });
 }
@@ -1299,7 +1436,8 @@ async function runDeterministicScreen(limit = 5) {
     const lines = candidates.map((pool, i) => {
       const feeTvl = pool.fee_active_tvl_ratio ?? pool.fee_tvl_ratio ?? "?";
       const vol = pool.volume_window ?? pool.volume_24h ?? "?";
-      return `${i + 1}. ${pool.name} | ${pool.pool}\n   fee/aTVL ${feeTvl}% | vol $${vol} | organic ${pool.organic_score ?? "?"}`;
+      const source = pool.gmgn ? ` | GMGN smart ${pool.gmgn_smart_wallets ?? "?"}, KOL ${pool.gmgn_kol_wallets ?? "?"}, total fee ${pool.gmgn_total_fee_sol ?? "?"} SOL` : ` | organic ${pool.organic_score ?? "?"}`;
+      return `${i + 1}. ${pool.name} | ${pool.pool}\n   fee/aTVL ${feeTvl}% | vol $${vol}${source}`;
     });
     return `Top candidates (${candidates.length})\n\n${lines.join("\n")}`;
   }
@@ -1390,6 +1528,41 @@ async function drainTelegramQueue() {
 async function telegramHandler(msg) {
   const text = msg?.text?.trim();
   if (!text) return;
+
+  if (_pendingInput && !msg.isCallback) {
+    const pending = _pendingInput;
+    if (Date.now() > pending.expiresAt || text.startsWith("/")) {
+      _pendingInput = null;
+      if (text === "/cancel") {
+        await sendMessage(`Cancelled editing ${pending.key}.`).catch(() => {});
+        return;
+      }
+    } else {
+      _pendingInput = null;
+      const lowered = text.toLowerCase();
+      let value;
+      if (LIST_INPUT_KEYS.has(pending.key)) {
+        value = ["none", "off", "clear"].includes(lowered)
+          ? []
+          : text.split(",").map((entry) => entry.trim()).filter(Boolean).slice(0, 50);
+      } else if (lowered === "off" || lowered === "null") {
+        value = null;
+      } else {
+        value = Number(text);
+        if (!Number.isFinite(value)) {
+          await sendMessage(`Invalid value "${text}" — must be a number or "off".`).catch(() => {});
+          return;
+        }
+      }
+      const result = await executeTool("update_config", { changes: { [pending.key]: value }, reason: "Telegram input field" });
+      if (!result?.success) {
+        await sendMessage(`Failed to update ${pending.key}: ${result?.error || (result?.unknown || []).join(", ") || "unknown error"}`).catch(() => {});
+        return;
+      }
+      await showSettingsMenu({ messageId: pending.menuMsgId, page: pending.page }).catch(() => {});
+      return;
+    }
+  }
   if (msg?.isCallback && text.startsWith("cfg:")) {
     try {
       await applySettingsMenuCallback(msg);
@@ -1676,6 +1849,24 @@ async function telegramHandler(msg) {
 function fmtPct(value) {
   const n = Number(value);
   return Number.isFinite(n) ? `${n.toFixed(2)}%` : "?";
+}
+
+function buildGmgnFunnelReport(stageCounts, allFiltered = [], { fromStage = 1 } = {}) {
+  if (!stageCounts) return null;
+  const sc = stageCounts;
+  const funnel = `GMGN funnel: ranked=${sc.ranked ?? "?"} → S1=${sc.s1 ?? "?"} → S2=${sc.s2 ?? "?"} → S3=${sc.s3 ?? "?"} → S4=${sc.s4 ?? "?"} → final=${sc.s5 ?? "?"}`;
+  const byStage = {};
+  for (const f of allFiltered) {
+    if (!(f.stage >= fromStage)) continue;
+    const key = `s${f.stage}`;
+    if (!byStage[key]) byStage[key] = [];
+    byStage[key].push(`${f.name}: ${f.reason}`);
+  }
+  const stageLabels = { s2: "S2 info", s3: "S3 pool", s4: "S4 indicators", s5: "S5 pick" };
+  const details = Object.entries(byStage)
+    .map(([key, items]) => `${stageLabels[key] || key}:\n${items.slice(0, 8).map(r => `  • ${r}`).join("\n")}`)
+    .join("\n");
+  return details ? `${funnel}\n\n${details}` : funnel;
 }
 
 function getLoneCandidateSkipReason({ pool, sw, n, ti } = {}) {
