@@ -414,16 +414,6 @@ Reason is optional but helpful — logged as a lesson when provided.`,
     }
   },
 
-  {
-    type: "function",
-    function: {
-      name: "self_update",
-      description: `Pull the latest code from git and restart the agent.
-Use when the user says "update", "pull latest", "update yourself", etc.
-Responds with what changed before restarting in 3 seconds.`,
-      parameters: { type: "object", properties: {} }
-    }
-  },
 
   {
     type: "function",

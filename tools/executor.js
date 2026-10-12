@@ -23,7 +23,7 @@ import { getTokenInfo, getTokenHolders, getTokenNarrative } from "./token.js";
 import { config, reloadScreeningThresholds, MIN_SAFE_BINS_BELOW } from "../config.js";
 import { getRecentDecisions } from "../decision-log.js";
 import fs from "fs";
-import { execSync, spawn } from "child_process";
+// child_process removed with self_update (hardened build)
 import { REPO_ROOT, repoPath } from "../repo-root.js";
 import { normalizeTimeframe, scaleScreeningToTimeframe } from "../screening-scales.js";
 
@@ -320,32 +320,6 @@ const toolMap = {
     const ok = setPositionInstruction(position_address, instruction || null);
     if (!ok) return { error: `Position ${position_address} not found in state` };
     return { saved: true, position: position_address, instruction: instruction || null };
-  },
-  self_update: async () => {
-    try {
-      const result = execSync("git pull", { cwd: REPO_ROOT, encoding: "utf8" }).trim();
-      if (result.includes("Already up to date")) {
-        return { success: true, updated: false, message: "Already up to date — no restart needed." };
-      }
-      // Delay restart so this tool response (and Telegram message) gets sent first
-      setTimeout(() => {
-        if (!process.env.pm_id) {
-          const child = spawn(process.execPath, process.argv.slice(1), {
-            detached: true,
-            stdio: "inherit",
-            cwd: REPO_ROOT,
-          });
-          child.unref();
-        }
-        process.exit(0);
-      }, 3000);
-      const restartMode = process.env.pm_id
-        ? "PM2 detected — exiting in 3s so PM2 can restart the managed process."
-        : "Restarting in 3s...";
-      return { success: true, updated: true, message: `Updated! ${restartMode}\n${result}` };
-    } catch (e) {
-      return { success: false, error: e.message };
-    }
   },
   get_performance_history: getPerformanceHistory,
   get_recent_decisions: ({ limit } = {}) => ({ decisions: getRecentDecisions(limit || 6) }),
@@ -713,7 +687,6 @@ const WRITE_TOOLS = new Set([
 ]);
 const PROTECTED_TOOLS = new Set([
   ...WRITE_TOOLS,
-  "self_update",
 ]);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -994,22 +967,6 @@ async function runSafetyChecks(name, args) {
     case "swap_token": {
       // Basic check — prevent swapping when DRY_RUN is true
       // (handled inside swapToken itself, but belt-and-suspenders)
-      return { pass: true };
-    }
-
-    case "self_update": {
-      if (process.env.ALLOW_SELF_UPDATE !== "true") {
-        return {
-          pass: false,
-          reason: "self_update is disabled by default. Set ALLOW_SELF_UPDATE=true locally if you really want to enable it.",
-        };
-      }
-      if (!process.stdin.isTTY) {
-        return {
-          pass: false,
-          reason: "self_update is only allowed from a local interactive TTY session, not from Telegram or background automation.",
-        };
-      }
       return { pass: true };
     }
 
