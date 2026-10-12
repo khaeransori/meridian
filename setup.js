@@ -345,7 +345,7 @@ const gasReserve = await askNum(
 
 const maxDeployAmount = await askNum(
   "Max deploy amount SOL (ceiling)",
-  p("maxDeployAmount", 50),
+  p("maxDeployAmount", 0.5),
   { min: 0.1 }
 );
 
