@@ -54,3 +54,4 @@ traxr-log.jsonl
 # paper trading (DRY_RUN)
 paper-positions.json
 backups/
+*.bak-*
