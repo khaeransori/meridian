@@ -51,6 +51,12 @@ try {
     assert.equal(row.in_range, true);
   });
 
+  await t("bid_ask earns more once price sits in the heavy lower bins", async () => {
+    const p = paper.getPaperPosition(id);
+    const top = p.bin_sol[0], bottom = p.bin_sol[p.bin_sol.length - 1];
+    assert.ok(bottom > top * 30, `weights top ${top} bottom ${bottom}`);
+  });
+
   await t("price drop: SOL converts to token, PnL negative, still in range", async () => {
     market.priceSol = 0.001 / Math.pow(1.01, 20); // ~20 bins down (-18%)
     paper._clearSnapshotCache();
@@ -78,8 +84,9 @@ try {
     fs.writeFileSync(repoPath("paper-positions.json"), JSON.stringify(d));
     await paper.getPaperPositions();
     const fees = paper.getPaperPosition(id).fees_sol;
-    // expected ≈ 500/60*3 * (50/50000) * 0.7 / 100 SOL = 0.000175
-    assert.ok(fees > 0.0001 && fees < 0.0003, `fees ${fees}`);
+    // bid_ask, at the TOP bin: weight 1/861 → 0.5/861 SOL × 41 bins ≈ 0.0238 SOL ≈ $2.38 → share 4.76e-5 of $50k TVL
+    // expected = $500/60 × 3 min × 4.76e-5 × 0.7 / $100 ≈ 8.3e-6 SOL (vs 1.75e-4 if the whole position earned)
+    assert.ok(fees > 7e-6 && fees < 1e-5, `fees ${fees}`);
   });
 
   await t("close via dlmm.closePosition: real quote path, slippage counted, records performance", async () => {

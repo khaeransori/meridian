@@ -11,10 +11,13 @@
  *    near the active bin, bid_ask = more toward the bottom).
  *  - When price falls through a bin, that bin's SOL becomes token at the bin
  *    price (that's how DLMM fills). Value = remaining SOL + tokens * price.
- *  - Fees: while in range, the position earns
- *    pool_fees_per_minute * minutes * (position_value / pool_TVL) * paperFeeShare.
- *    paperFeeShare (default 0.7) is a haircut because only bins near the active
- *    bin earn, and our liquidity is spread wide.
+ *  - Fees: only the bin at the current price earns. While in range we earn
+ *    pool_fees_per_minute * minutes * share * paperFeeShare, where
+ *    share = (our liquidity in the CURRENT active bin × our bin count) / pool TVL.
+ *    That equals value/TVL for a flat (spot) shape, and is much smaller for
+ *    bid_ask at entry (little SOL near the top), growing as price falls into the
+ *    heavy lower bins. It assumes the pool's own liquidity is spread over a
+ *    similar number of bins. paperFeeShare (default 0.7) is an extra haircut.
  *  - Close: token leg -> SOL via Jupiter quote, minus estimated network fees.
  *
  * Limitations (said plainly in the report): fees are an estimate, the price
@@ -110,7 +113,9 @@ function valueAt(pos, price) {
   });
   const n = pos.bin_sol.length - 1;
   const inRange = kNow >= -0.5 && kNow <= n + 0.5;
-  return { sol, tokens, value_sol: sol + tokens * price, kNow, inRange, activeBin: pos.entry_active_bin - Math.round(kNow) };
+  const kActive = Math.round(kNow);
+  const activeBinSol = inRange ? (pos.bin_sol[Math.min(n, Math.max(0, kActive))] || 0) : 0;
+  return { sol, tokens, value_sol: sol + tokens * price, kNow, inRange, activeBin: pos.entry_active_bin - kActive, activeBinSol };
 }
 
 export async function openPaperPosition({ pool_address, pool_name, strategy, amount_sol, bins_below, active_bin, bin_step }) {
@@ -153,7 +158,7 @@ async function mark(pos) {
   const now = Date.now();
   const dtMin = Math.min(MAX_ACCRUAL_MIN, Math.max(0, (now - (pos.last_mark_at || now)) / 60_000));
   if (v.inRange && snap.tvl_usd > 0 && dtMin > 0) {
-    const share = Math.min(1, (v.value_sol * snap.sol_usd) / snap.tvl_usd);
+    const share = Math.min(1, (v.activeBinSol * pos.bin_sol.length * snap.sol_usd) / snap.tvl_usd);
     const feeShare = Number(config.management.paperFeeShare ?? 0.7);
     pos.fees_sol += ((snap.fees_1h_usd / 60) * dtMin * share * feeShare) / snap.sol_usd;
   }
