@@ -278,7 +278,7 @@ export const config = {
 
   // ─── Opportunity poller (catches strong pools between screening cycles) ──
   opportunity: {
-    enabled: u.opportunityPollEnabled ?? true,
+    enabled: u.opportunityPollEnabled ?? false, // hardened: off by default
     pollIntervalSec: Number(u.opportunityPollIntervalSec ?? 45),
     limit: Number(u.opportunityPollLimit ?? 10),
     // Pre-gate: only trigger the full deploy decision when the best candidate's
