@@ -96,7 +96,8 @@ const client = new OpenAI({
   timeout: 5 * 60 * 1000,
 });
 
-const DEFAULT_MODEL = process.env.LLM_MODEL || "openrouter/healer-alpha";
+// Hardened: no implicit stealth/free model. Set LLM_MODEL or per-role models in user-config.
+const DEFAULT_MODEL = process.env.LLM_MODEL || null;
 
 const MUTATING_TOOL_INTENTS = /\b(deploy|open position|add liquidity|lp into|invest in|close|exit|withdraw|remove liquidity|claim|harvest|collect|swap|convert|sell|exchange|block|unblock|blacklist|add smart wallet|remove smart wallet|add wallet|remove wallet|pin|unpin|clear lesson|add lesson|set active strategy|remove strategy|add strategy|set |change |update |self.?update|pull latest|git pull|update yourself)\b/i;
 const LIVE_DATA_TOOL_INTENTS = /\b(balance|wallet|position|portfolio|pnl|yield|range|show positions|open positions|screen|candidate|find pool|search|research|analyze|check pool|token holders|narrative|study top|top lpers?|lp behavior|who.?s lping|performance|history|stats|report|list smart wallets|list blacklist|list blocked deployers|list lessons)\b/i;
@@ -190,9 +191,11 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
 
     try {
       const activeModel = model || DEFAULT_MODEL;
+      if (!activeModel) {
+        throw new Error("No LLM model configured. Set LLM_MODEL in .env or managementModel/screeningModel/generalModel in user-config.json.");
+      }
 
       // Retry up to 3 times on transient provider errors (502, 503, 529)
-      const FALLBACK_MODEL = "stepfun/step-3.5-flash:free";
       let response;
       let usedModel = activeModel;
       // Force a tool call on step 0 for action intents — prevents the model from inventing deploy/close outcomes
@@ -236,13 +239,9 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
         const errCode = response.error?.code;
         if (errCode === 502 || errCode === 503 || errCode === 529) {
           const wait = (attempt + 1) * 5000;
-          if (attempt === 1 && usedModel !== FALLBACK_MODEL) {
-            usedModel = FALLBACK_MODEL;
-            log("agent", `Switching to fallback model ${FALLBACK_MODEL}`);
-          } else {
-            log("agent", `Provider error ${errCode}, retrying in ${wait / 1000}s (attempt ${attempt + 1}/3)`);
-            await new Promise((r) => setTimeout(r, wait));
-          }
+          // Hardened: never silently switch to a different (free) model — retry same model, then fail the cycle.
+          log("agent", `Provider error ${errCode}, retrying ${usedModel} in ${wait / 1000}s (attempt ${attempt + 1}/3)`);
+          await new Promise((r) => setTimeout(r, wait));
         } else {
           break;
         }

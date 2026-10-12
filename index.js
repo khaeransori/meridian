@@ -50,7 +50,10 @@ if (isMain) {
     log("startup_warn", `process.cwd() differs from repo root — use "npm run pm2:start" (not "pm2 start index.js" from another directory)`);
   }
   log("startup", `Mode: ${process.env.DRY_RUN === "true" ? "DRY RUN" : "LIVE"}`);
-  log("startup", `Model: ${process.env.LLM_MODEL || "hermes-3-405b"}`);
+  log("startup", `Model: mgmt=${config.llm.managementModel || "UNSET"} | screen=${config.llm.screeningModel || "UNSET"} | general=${config.llm.generalModel || "UNSET"}`);
+  if (!config.llm.managementModel || !config.llm.screeningModel || !config.llm.generalModel) {
+    log("startup_warn", "One or more LLM models are not configured — those cycles will fail instead of using a fallback model. Set LLM_MODEL or per-role models.");
+  }
   ensureAgentId();
   bootstrapHiveMind().catch((error) => log("hivemind_warn", `Bootstrap failed: ${error.message}`));
   startHiveMindBackgroundSync();
