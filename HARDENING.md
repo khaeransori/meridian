@@ -45,7 +45,7 @@ Tests (offline, mocked network): `npm run test:hardening && npm run test:gmgn`
 {
   "llmProvider": "claude-local",
   "claudeLocal": {
-    "models": { "default": "sonnet", "screening": "opus", "management": "sonnet" },
+    "models": { "default": "claude-sonnet-5-5" },
     "effort": { "default": null, "screening": "high" },
     "timeoutMs": 240000
   }

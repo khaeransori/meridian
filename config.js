@@ -250,7 +250,7 @@ export const config = {
     command: u.claudeLocal?.command ?? "claude",
     // Tunable per role. Aliases (haiku/sonnet/opus) or full model ids both work.
     models: {
-      default:    u.claudeLocal?.models?.default    ?? "sonnet",
+      default:    u.claudeLocal?.models?.default    ?? "claude-sonnet-5-5",
       management: u.claudeLocal?.models?.management ?? null,
       screening:  u.claudeLocal?.models?.screening  ?? null,
       general:    u.claudeLocal?.models?.general    ?? null,
