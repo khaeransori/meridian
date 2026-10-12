@@ -111,6 +111,7 @@ export function trackPosition({
     pending_exit_count: 0,
     pending_exit_started_at: null,
     trailing_active: false,
+    oor_count: 0,
   };
   pushEvent(state, { action: "deploy", position, pool_name: pool_name || pool });
   save(state);
@@ -126,8 +127,9 @@ export function markOutOfRange(position_address) {
   if (!pos) return;
   if (!pos.out_of_range_since) {
     pos.out_of_range_since = new Date().toISOString();
+    pos.oor_count = (pos.oor_count ?? 0) + 1;
     save(state);
-    log("state", `Position ${position_address} marked out of range`);
+    log("state", `Position ${position_address} marked out of range (OOR #${pos.oor_count})`);
   }
 }
 
@@ -374,8 +376,9 @@ export function updatePnlAndCheckExits(position_address, positionData, mgmtConfi
   // Update OOR state
   if (in_range === false && !pos.out_of_range_since) {
     pos.out_of_range_since = new Date().toISOString();
+    pos.oor_count = (pos.oor_count ?? 0) + 1;
     changed = true;
-    log("state", `Position ${position_address} marked out of range`);
+    log("state", `Position ${position_address} marked out of range (OOR #${pos.oor_count})`);
   } else if (in_range === true && pos.out_of_range_since) {
     pos.out_of_range_since = null;
     changed = true;
@@ -431,6 +434,43 @@ export function updatePnlAndCheckExits(position_address, positionData, mgmtConfi
       action: "LOW_YIELD",
       reason: `Low yield: fee/TVL ${fee_per_tvl_24h.toFixed(2)}% < min ${mgmtConfig.minFeePerTvl24h}% (age: ${age_minutes ?? "?"}m)`,
     };
+  }
+
+  // ── Position age exit (stale positions) — ported from nightly-2026-04 ──
+  const maxAge = mgmtConfig.maxPositionAgeMinutes;
+  const maxAgePnl = mgmtConfig.maxPositionAgePnlPct ?? 2;
+  if (maxAge != null && age_minutes != null && age_minutes >= maxAge) {
+    if (!pnl_pct_suspicious && currentPnlPct != null && currentPnlPct < maxAgePnl) {
+      return {
+        action: "STALE_POSITION",
+        reason: `Position age ${Math.round(age_minutes)}m >= ${maxAge}m with PnL ${currentPnlPct.toFixed(2)}% < ${maxAgePnl}%`,
+      };
+    }
+  }
+
+  // ── OOR frequency exit (flapping positions) ───────────────────
+  const oorLimit = mgmtConfig.oorFrequencyLimit;
+  if (oorLimit != null && (pos.oor_count ?? 0) >= oorLimit) {
+    return {
+      action: "OOR_FREQUENCY",
+      reason: `Position went OOR ${pos.oor_count} times (limit: ${oorLimit}) — unstable range`,
+    };
+  }
+
+  // ── Volatility spike exit ─────────────────────────────────────
+  // current_volatility is attached by the management cycle (pool detail, same timeframe as screening).
+  // The old branch read positionData.volatility, which getMyPositions never populated, so this rule never fired.
+  const volSpikeRatio = mgmtConfig.volatilitySpikeRatio;
+  const currentVol = Number(positionData.current_volatility);
+  const deployVol = Number(pos.volatility);
+  if (volSpikeRatio != null && Number.isFinite(currentVol) && Number.isFinite(deployVol) && deployVol > 0) {
+    const ratio = currentVol / deployVol;
+    if (ratio >= volSpikeRatio) {
+      return {
+        action: "VOLATILITY_SPIKE",
+        reason: `Volatility spiked ${ratio.toFixed(1)}x (${deployVol.toFixed(1)} → ${currentVol.toFixed(1)}, limit: ${volSpikeRatio}x)`,
+      };
+    }
   }
 
   return null;

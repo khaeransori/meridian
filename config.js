@@ -198,6 +198,11 @@ export const config = {
     trailingTakeProfit:    u.trailingTakeProfit    ?? true,
     trailingTriggerPct:    u.trailingTriggerPct    ?? 3,    // activate trailing at X% PnL
     trailingDropPct:       u.trailingDropPct       ?? 1.5,  // close when drops X% from peak
+    // Ported from nightly-2026-04: extra deterministic exits (null = disabled)
+    maxPositionAgeMinutes: u.maxPositionAgeMinutes !== undefined ? u.maxPositionAgeMinutes : 1440, // close stale positions after 24h...
+    maxPositionAgePnlPct:  u.maxPositionAgePnlPct  ?? 2,     // ...only if PnL is below this %
+    oorFrequencyLimit:     u.oorFrequencyLimit     !== undefined ? u.oorFrequencyLimit : 4, // close after N separate OOR events
+    volatilitySpikeRatio:  u.volatilitySpikeRatio  !== undefined ? u.volatilitySpikeRatio : 3, // close if pool volatility >= N x deploy volatility
     pnlSanityMaxDiffPct:   u.pnlSanityMaxDiffPct   ?? 5,    // max allowed diff between reported and derived pnl % before ignoring a tick
     // SOL mode — positions, PnL, and balances reported in SOL instead of USD
     solMode:               u.solMode               ?? false,

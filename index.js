@@ -7,7 +7,7 @@ import { agentLoop } from "./agent.js";
 import { log } from "./logger.js";
 import { getMyPositions, closePosition, getActiveBin } from "./tools/dlmm.js";
 import { getWalletBalances } from "./tools/wallet.js";
-import { getTopCandidates, degenScore } from "./tools/screening.js";
+import { getTopCandidates, degenScore, getPoolDetail } from "./tools/screening.js";
 import { formatGmgnCandidateForPrompt } from "./tools/gmgn.js";
 import { config, reloadScreeningThresholds, computeDeployAmount } from "./config.js";
 import { evolveThresholds, getPerformanceSummary } from "./lessons.js";
@@ -247,9 +247,22 @@ export async function runManagementCycle({ silent = false } = {}) {
     }
 
     // Snapshot + load pool memory
+    // Current pool volatility (same timeframe as screening) for the volatility-spike exit.
+    const currentVolByPool = new Map();
+    if (config.management.volatilitySpikeRatio != null) {
+      await Promise.all([...new Set(positions.map((p) => p.pool))].map(async (pool) => {
+        try {
+          const d = await getPoolDetail({ pool_address: pool, timeframe: config.screening.timeframe });
+          const v = Number(d?.volatility);
+          if (Number.isFinite(v) && v > 0) currentVolByPool.set(pool, v);
+        } catch (e) {
+          log("state", `Volatility check skipped for ${pool.slice(0, 8)}: ${e.message}`);
+        }
+      }));
+    }
     const positionData = positions.map((p) => {
       recordPositionSnapshot(p.pool, p);
-      return { ...p, recall: recallForPool(p.pool) };
+      return { ...p, current_volatility: currentVolByPool.get(p.pool) ?? null, recall: recallForPool(p.pool) };
     });
 
     // JS exit checks. Management is the slow cron backstop: raise peak immediately
