@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 import { agentLoop } from "./agent.js";
 import { log } from "./logger.js";
 import { getMyPositions, closePosition, getActiveBin } from "./tools/dlmm.js";
+import { getPaperSummary } from "./tools/paper.js";
 import { getWalletBalances } from "./tools/wallet.js";
 import { getTopCandidates, degenScore, getPoolDetail } from "./tools/screening.js";
 import { formatGmgnCandidateForPrompt } from "./tools/gmgn.js";
@@ -1457,6 +1458,7 @@ function formatHelpText() {
     "",
     "/help — show commands",
     "/status — wallet + positions snapshot",
+    "/paper — paper-trading results (DRY_RUN)",
     "/wallet — wallet, deploy amount, HiveMind status",
     "/positions — list open positions",
     "/pool <n> — detailed info for one open position",
@@ -1647,6 +1649,19 @@ async function telegramHandler(msg) {
 
   if (text === "/help") {
     await sendMessage(formatHelpText()).catch(() => {});
+    return;
+  }
+
+  if (text === "/paper") {
+    const s = getPaperSummary();
+    const lines = [
+      "📄 Paper trading (DRY RUN — simulated, no transactions)",
+      `Open: ${s.open} | Closed: ${s.closed}${s.win_rate_pct != null ? ` | Win rate: ${s.win_rate_pct}%` : ""}`,
+      `Total PnL: ${s.total_pnl_sol} SOL${s.avg_pnl_pct != null ? ` | Avg: ${s.avg_pnl_pct}%` : ""}`,
+      `Fees earned (est.): ${s.total_fees_sol} SOL | Slippage paid: ${s.total_slippage_sol} SOL`,
+      ...(s.last.length ? ["", "Last closes:", ...s.last.map((x) => `• ${x.pool}: ${x.pnl_pct}% in ${x.held_min}m — ${x.reason}`)] : []),
+    ];
+    await sendMessage(lines.join("\n")).catch(() => {});
     return;
   }
 

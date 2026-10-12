@@ -470,6 +470,7 @@ async function poll(onMessage) {
 const BOT_COMMANDS = [
   { command: "help",       description: "Show commands" },
   { command: "status",     description: "Wallet + positions snapshot" },
+  { command: "paper",      description: "Paper-trading results (DRY RUN)" },
   { command: "wallet",     description: "Wallet, deploy amount, HiveMind status" },
   { command: "positions",  description: "List open positions" },
   { command: "pool",       description: "Detailed info for one open position" },

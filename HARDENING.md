@@ -59,3 +59,17 @@ Tests (offline, mocked network): `npm run test:hardening && npm run test:gmgn`
 - Test: `npm run test:claude-local` (live, uses your subscription).
 
 Offline tests: `npm run test:offline` (27 checks).
+
+## Paper trading (DRY_RUN)
+
+In `DRY_RUN` a deploy opens a **simulated** position (`paper_…` id, stored in `paper-positions.json`). Nothing is signed or sent.
+
+- Marked to market from the Meteora pool API (price, TVL, 1h fees) every poll.
+- Single-sided SOL bins fill into token as price falls (spot / curve / bid_ask weights).
+- Fees accrue only while in range: `pool fees/min × (position value / pool TVL) × paperFeeShare` (default 0.7, set `paperFeeShare`).
+- All exit rules (stop loss, trailing TP, OOR, low yield, age/OOR-count/vol-spike) run on paper positions exactly like live ones.
+- On close the token leg is priced with a **real Jupiter quote** → slippage and price impact are counted; network fees are estimated (~0.00075 SOL per close).
+- Paper closes are recorded in lessons and the decision log (flagged `paper: true`) but **never** feed threshold evolution or signal weights.
+- Telegram `/paper` shows open/closed count, win rate, total PnL in SOL, fees and slippage.
+
+Limits: fee income is an estimate (real share depends on which bins are active), the price feed is ~1 min fresh, MEV/failed-tx costs aren't modeled. Treat paper PnL as an honest upper-ish bound, not a promise.

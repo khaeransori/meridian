@@ -27,6 +27,7 @@ import { recordPerformance } from "../lessons.js";
 import { isBaseMintOnCooldown, isPoolOnCooldown } from "../pool-memory.js";
 import { normalizeMint } from "./wallet.js";
 import { appendDecision } from "../decision-log.js";
+import { isPaperMode, openPaperPosition, getPaperPositions, getPaperPosition, closePaperPosition, claimPaperFees } from "./paper.js";
 import { agentMeridianJson, getAgentIdForRequests, getAgentMeridianHeaders } from "./agent-meridian.js";
 import { getAndClearStagedSignals } from "../signal-tracker.js";
 import { computePositions, fetchDlmmPnlForPool } from "./pnl.js";
@@ -576,24 +577,6 @@ export async function deployPosition({
     );
   }
 
-  if (process.env.DRY_RUN === "true") {
-    return {
-      dry_run: true,
-      would_deploy: {
-        pool_address,
-        strategy: activeStrategy,
-        bins_below: activeBinsBelow,
-        bins_above: activeBinsAbove,
-        downside_pct: downside_pct ?? null,
-        upside_pct: upside_pct ?? null,
-        amount_x: finalAmountX,
-        amount_y: finalAmountY,
-        wide_range: totalBins > 69,
-      },
-      message: "DRY RUN — no transaction sent",
-    };
-  }
-
   const isWideRange = totalBins > 69;
   const minBinId = activeBin.binId - activeBinsBelow;
   const maxBinId = isSingleSidedSol ? activeBin.binId : activeBin.binId + activeBinsAbove;
@@ -618,6 +601,40 @@ export async function deployPosition({
   // Read base fee directly from pool — baseFactor * binStep / 10^6 gives fee in %
   const baseFactor = pool.lbPair.parameters?.baseFactor ?? 0;
   const actualBaseFee = base_fee ?? (baseFactor > 0 ? parseFloat((baseFactor * actualBinStep / 1e6 * 100).toFixed(4)) : null);
+
+  // ─── DRY_RUN → paper position (simulated, tracked to close; nothing is signed) ──
+  if (isPaperMode()) {
+    const paper = await openPaperPosition({
+      pool_address, pool_name, strategy: activeStrategy, amount_sol: finalAmountY,
+      bins_below: activeBinsBelow, active_bin: activeBin.binId, bin_step: actualBinStep,
+    });
+    const signalSnapshot = config.darwin?.enabled ? getAndClearStagedSignals(pool_address, baseMint) : null;
+    trackPosition({
+      position: paper.position, pool: pool_address, pool_name: paper.pool_name, strategy: activeStrategy,
+      bin_range: { min: minBinId, max: maxBinId, bins_below: activeBinsBelow, bins_above: activeBinsAbove },
+      bin_step, volatility: normalizedVolatility, fee_tvl_ratio, organic_score,
+      amount_sol: finalAmountY, amount_x: 0, active_bin: activeBin.binId,
+      initial_value_usd: paper.initial_value_usd, signal_snapshot: signalSnapshot,
+      entry_mcap, entry_tvl, entry_volume, entry_holders,
+    });
+    appendDecision({
+      type: "deploy", actor: "SCREENER", pool: pool_address, pool_name, position: paper.position,
+      summary: `PAPER deployed ${finalAmountY} SOL with ${activeStrategy}`,
+      reason: `Chosen range ${minBinId}→${maxBinId} around active bin ${activeBin.binId}`,
+      risks: [normalizedVolatility != null ? `volatility ${normalizedVolatility}` : null, fee_tvl_ratio != null ? `fee/TVL ${fee_tvl_ratio}%` : null].filter(Boolean),
+      metrics: { amount_sol: finalAmountY, strategy: activeStrategy, active_bin: activeBin.binId, min_bin: minBinId, max_bin: maxBinId, paper: true },
+    });
+    return {
+      success: true, paper: true, dry_run: true,
+      position: paper.position, pool: pool_address, pool_name,
+      bin_range: { min: minBinId, max: maxBinId, active: activeBin.binId },
+      price_range: { min: minPrice, max: maxPrice },
+      range_coverage: { downside_pct: downsideCoveragePct, upside_pct: upsideCoveragePct, width_pct: totalWidthPct, active_price: activePrice },
+      bin_step: actualBinStep, base_fee: actualBaseFee, strategy: activeStrategy, wide_range: isWideRange,
+      amount_x: 0, amount_y: finalAmountY, txs: [],
+      message: "PAPER deploy — simulated position opened, no transaction sent",
+    };
+  }
 
   const totalYLamports = new BN(Math.floor(finalAmountY * 1e9));
   // Token X amount uses mint decimals when available, falling back to 9.
@@ -946,6 +963,16 @@ async function fetchLpAgentOpenPositions(walletAddress) {
 export async function getPositionPnl({ pool_address, position_address }) {
   pool_address = normalizeMint(pool_address);
   position_address = normalizeMint(position_address);
+  if (isPaperMode() && getPaperPosition(position_address)) {
+    const rows = await getPaperPositions();
+    const p = rows.find((r) => r.position === position_address);
+    if (!p) return { error: "Paper position not found" };
+    return {
+      pnl_usd: p.pnl_usd, pnl_pct: p.pnl_pct, current_value_usd: p.total_value_usd, unclaimed_fee_usd: p.unclaimed_fees_usd,
+      all_time_fees_usd: p.collected_fees_usd, fee_per_tvl_24h: p.fee_per_tvl_24h, in_range: p.in_range,
+      lower_bin: p.lower_bin, upper_bin: p.upper_bin, active_bin: p.active_bin, age_minutes: p.age_minutes, paper: true,
+    };
+  }
   const walletAddress = getWallet().publicKey.toString();
   // Prefer the public-infra path (RPC + Jupiter + Meteora deposits) used by getMyPositions.
   if (config.pnl.source === "rpc") {
@@ -1156,6 +1183,30 @@ export async function getMyPositions({ force = false, silent = false, wallet_add
     walletAddress = walletOverride || getWallet().publicKey.toString();
   } catch {
     return { wallet: null, total_positions: 0, positions: [], error: "Wallet not configured" };
+  }
+
+  // DRY_RUN: the bot's own positions are the paper book (real wallet positions are ignored).
+  if (useLocalWallet && isPaperMode()) {
+    const loadPaper = async () => {
+      try {
+        const rows = await getPaperPositions();
+        for (const r of rows) {
+          if (r.in_range === false) markOutOfRange(r.position);
+          else if (r.in_range === true) markInRange(r.position);
+          r.minutes_out_of_range = minutesOutOfRange(r.position);
+          r.instruction = getTrackedPosition(r.position)?.instruction ?? null;
+        }
+        syncOpenPositions(rows.map((r) => r.position));
+        const result = { wallet: walletAddress, total_positions: rows.length, positions: rows, source: "paper" };
+        _positionsCache = result;
+        _positionsCacheAt = Date.now();
+        return result;
+      } finally {
+        _positionsInflight = null;
+      }
+    };
+    _positionsInflight = loadPaper();
+    return _positionsInflight;
   }
 
   const loadPositions = async () => { try {
@@ -1451,7 +1502,12 @@ export async function searchPools({ query, limit = 10 }) {
 // ─── Claim Fees ────────────────────────────────────────────────
 export async function claimFees({ position_address }) {
   position_address = normalizeMint(position_address);
-  if (process.env.DRY_RUN === "true") {
+  if (isPaperMode()) {
+    if (getPaperPosition(position_address)) {
+      const r = claimPaperFees(position_address);
+      if (r.success) recordClaim(position_address, 0);
+      return r;
+    }
     return { dry_run: true, would_claim: position_address, message: "DRY RUN — no transaction sent" };
   }
 
@@ -1497,8 +1553,42 @@ export async function claimFees({ position_address }) {
 // ─── Close Position ────────────────────────────────────────────
 export async function closePosition({ position_address, reason }) {
   position_address = normalizeMint(position_address);
-  if (process.env.DRY_RUN === "true") {
-    return { dry_run: true, would_close: position_address, message: "DRY RUN — no transaction sent" };
+  if (isPaperMode()) {
+    if (!getPaperPosition(position_address)) {
+      return { dry_run: true, would_close: position_address, message: "DRY RUN — no transaction sent (not a paper position)" };
+    }
+    const trackedPaper = getTrackedPosition(position_address);
+    const paperPos = getPaperPosition(position_address);
+    const minutesOORPaper = minutesOutOfRange(position_address) || 0;
+    const r = await closePaperPosition(position_address, reason);
+    if (!r.success) return r;
+    recordClose(position_address, reason || "agent decision");
+    try {
+      await recordPerformance({
+        position: position_address, pool: r.pool, pool_name: r.pool_name, base_mint: paperPos?.base_mint || null,
+        strategy: trackedPaper?.strategy, bin_range: trackedPaper?.bin_range, bin_step: trackedPaper?.bin_step || null,
+        volatility: trackedPaper?.volatility ?? null, fee_tvl_ratio: trackedPaper?.fee_tvl_ratio || null,
+        organic_score: trackedPaper?.organic_score || null, amount_sol: trackedPaper?.amount_sol,
+        fees_earned_usd: r.fees_earned_usd, final_value_usd: r.final_value_usd,
+        initial_value_usd: trackedPaper?.initial_value_usd, minutes_held: r.minutes_held,
+        minutes_in_range: Math.max(0, r.minutes_held - minutesOORPaper),
+        close_reason: reason || "agent decision", deployed_at: trackedPaper?.deployed_at,
+        entry_mcap: trackedPaper?.entry_mcap ?? null, entry_tvl: trackedPaper?.entry_tvl ?? null,
+        entry_volume: trackedPaper?.entry_volume ?? null, entry_holders: trackedPaper?.entry_holders ?? null,
+        signal_snapshot: trackedPaper?.signal_snapshot ?? null,
+        paper: true, pnl_source_suspect: !!r.quote_failed,
+      });
+    } catch (e) {
+      log("paper_warn", `recordPerformance failed: ${e.message}`);
+    }
+    appendDecision({
+      type: "close", actor: "MANAGER", pool: r.pool, pool_name: r.pool_name, position: position_address,
+      summary: `PAPER closed at ${r.pnl_pct.toFixed(2)}% (slippage ${r.slippage_sol} SOL)`,
+      reason: reason || "agent decision",
+      metrics: { pnl_usd: r.pnl_usd, pnl_pct: r.pnl_pct, pnl_sol_pct: r.pnl_sol_pct, fees_sol: r.fees_sol, slippage_sol: r.slippage_sol, price_impact_pct: r.price_impact_pct, minutes_held: r.minutes_held, paper: true },
+    });
+    _positionsCacheAt = 0;
+    return r;
   }
 
   const tracked = getTrackedPosition(position_address);

@@ -91,7 +91,8 @@ try {
 
   await t("claude-local wiring: provider per role, models tunable", async () => {
     assert.deepEqual(Object.keys(config.llm.provider).sort(), ["general", "management", "screening"]);
-    assert.equal(config.llm.provider.screening, "openai", "default provider should stay openai");
+    const uc = fs.existsSync(repoPath("user-config.json")) ? JSON.parse(fs.readFileSync(repoPath("user-config.json"), "utf8")) : {};
+    if (!uc.llmProvider) assert.equal(config.llm.provider.screening, "openai", "default provider should stay openai");
     const { resolveClaudeLocalModel } = await import("../adapters/claude-local.js");
     assert.equal(resolveClaudeLocalModel("SCREENER", { models: { default: "sonnet", screening: "opus" } }), "opus");
     assert.equal(resolveClaudeLocalModel("MANAGER", { models: { default: "sonnet" } }), "sonnet");

@@ -338,7 +338,7 @@ function derivLesson(perf) {
  */
 export function evolveThresholds(perfData, config) {
   if (!perfData || perfData.length < MIN_EVOLVE_POSITIONS) return null;
-  perfData = perfData.filter((p) => !p.pnl_source_suspect); // exclude cache-fallback records
+  perfData = perfData.filter((p) => !p.pnl_source_suspect && !p.paper); // exclude cache-fallback + paper records
   if (perfData.length < MIN_EVOLVE_POSITIONS) return null;
 
   const winners = perfData.filter((p) => p.pnl_pct > 0);

@@ -24,7 +24,8 @@
     "test:hardening": "node test/test-hardening.js",
     "test:ported": "node test/test-ported.js",
     "test:claude-local": "node test/test-claude-local.js",
-    "test:offline": "npm run test:hardening && npm run test:gmgn && npm run test:ported"
+    "test:offline": "npm run test:hardening && npm run test:gmgn && npm run test:ported && npm run test:paper",
+    "test:paper": "node test/test-paper.js"
   },
   "dependencies": {
     "@meteora-ag/dlmm": "1.9.4",
