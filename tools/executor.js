@@ -462,7 +462,6 @@ const toolMap = {
       // meridian api / relay
       publicApiKey: ["api", "publicApiKey"],
       agentMeridianApiUrl: ["api", "url"],
-      lpAgentRelayEnabled: ["api", "lpAgentRelayEnabled"],
       // pnl fetcher / poller
       pnlSource: ["pnl", "source", ["pnlSource"]],
       pnlRpcUrl: ["pnl", "rpcUrl", ["pnlRpcUrl"]],

@@ -260,7 +260,9 @@ export const config = {
   api: {
     url: nonEmptyString(u.agentMeridianApiUrl, process.env.AGENT_MERIDIAN_API_URL, DEFAULT_AGENT_MERIDIAN_API_URL),
     publicApiKey: nonEmptyString(u.publicApiKey, process.env.PUBLIC_API_KEY, DEFAULT_AGENT_MERIDIAN_PUBLIC_KEY),
-    lpAgentRelayEnabled: u.lpAgentRelayEnabled ?? false,
+    // Hardened: relay lets a remote server build transactions the wallet signs.
+    // Only enabled via env LPAGENT_RELAY_ENABLED=true (not user-config, LLM, or Telegram).
+    lpAgentRelayEnabled: process.env.LPAGENT_RELAY_ENABLED === "true",
   },
 
   // ─── PnL fetcher / poller (public infra: RPC + Meteora deposits + Jupiter) ──

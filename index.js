@@ -1290,7 +1290,7 @@ function renderSettingsMenu(page = "main") {
     ];
   } else {
     rows = [
-      [toggleButton("solMode", "SOL mode"), toggleButton("lpAgentRelayEnabled", "LPAgent relay")],
+      [toggleButton("solMode", "SOL mode")],
       [toggleButton("chartIndicatorsEnabled", "Chart indicators"), toggleButton("trailingTakeProfit", "Trailing TP")],
       [
         settingButton("Risk / deploy", "cfg:page:risk"),
