@@ -76,8 +76,8 @@ function gmgnArray(key, legacyKey, fallback) {
 export const config = {
   // ─── Risk Limits ─────────────────────────
   risk: {
-    maxPositions:    u.maxPositions    ?? 3,
-    maxDeployAmount: u.maxDeployAmount ?? 50,
+    maxPositions:    u.maxPositions    ?? 1,   // hardened (was 3)
+    maxDeployAmount: u.maxDeployAmount ?? 0.5, // hardened (was 50)
   },
 
   // ─── Pool Screening Thresholds ───────────
@@ -184,7 +184,7 @@ export const config = {
     repeatDeployCooldownScope: u.repeatDeployCooldownScope ?? "token", // pool | token | both
     repeatDeployCooldownMinFeeEarnedPct: u.repeatDeployCooldownMinFeeEarnedPct ?? u.repeatDeployCooldownMinFeeYieldPct ?? 0,
     minVolumeToRebalance:  u.minVolumeToRebalance  ?? 1000,
-    stopLossPct:           u.stopLossPct           ?? u.emergencyPriceDropPct ?? -50,
+    stopLossPct:           u.stopLossPct           ?? u.emergencyPriceDropPct ?? -15, // hardened (was -50)
     takeProfitPct:         u.takeProfitPct         ?? u.takeProfitFeePct ?? 5,
     minFeePerTvl24h:       u.minFeePerTvl24h       ?? 7,
     minAgeBeforeYieldCheck: u.minAgeBeforeYieldCheck ?? 60, // minutes before low yield can trigger close

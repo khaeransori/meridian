@@ -112,7 +112,7 @@ const PRESETS = {
     trailingDropPct:       1,
     positionSizePct:       0.5,
     gasReserve:            0.15,
-    maxDeployAmount:       50,
+    maxDeployAmount:       0.5,  // hardened start (was 50)
     minFeePerTvl24h:       20,
     minAgeBeforeYieldCheck: 30,
     minClaimAmount:        3,
@@ -149,7 +149,7 @@ const PRESETS = {
     trailingDropPct:       1.5,
     positionSizePct:       0.35,
     gasReserve:            0.2,
-    maxDeployAmount:       50,
+    maxDeployAmount:       0.5,  // hardened start (was 50)
     minFeePerTvl24h:       25,
     minAgeBeforeYieldCheck: 60,
     minClaimAmount:        5,
@@ -186,7 +186,7 @@ const PRESETS = {
     trailingDropPct:       2,
     positionSizePct:       0.25,
     gasReserve:            0.25,
-    maxDeployAmount:       30,
+    maxDeployAmount:       0.5,  // hardened start (was 30)
     minFeePerTvl24h:       30,
     minAgeBeforeYieldCheck: 90,
     minClaimAmount:        5,
@@ -285,7 +285,7 @@ const deployAmountSol = await askNum(
 
 const maxPositions = await askNum(
   "Max concurrent positions",
-  e("maxPositions", 3),
+  e("maxPositions", 1),
   { min: 1, max: 10 }
 );
 

@@ -7,9 +7,9 @@
   "dryRun": true,
 
   "deployAmountSol": 0.5,
-  "maxPositions": 3,
+  "maxPositions": 1,
   "minSolToOpen": 0.55,
-  "maxDeployAmount": 50,
+  "maxDeployAmount": 0.5,
   "gasReserve": 0.2,
   "positionSizePct": 0.35,
 
@@ -51,7 +51,7 @@
   "oorCooldownTriggerCount": 3,
   "oorCooldownHours": 12,
   "minVolumeToRebalance": 1000,
-  "stopLossPct": -50,
+  "stopLossPct": -15,
   "takeProfitPct": 5,
   "minFeePerTvl24h": 7,
   "minAgeBeforeYieldCheck": 60,
