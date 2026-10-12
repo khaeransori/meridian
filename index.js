@@ -148,6 +148,37 @@ async function maybeRunMissedBriefing() {
   await runBriefing();
 }
 
+// ─── Stale-lock watchdog (ported from nightly-2026-04) ─────────────
+// A hung RPC / LLM / network call can pin a busy flag forever, and the bot then
+// silently stops managing positions until restart. Sample the flags and force-clear
+// any that stay set longer than STALE_LOCK_MS. Healthy cycles finish well under this.
+const STALE_LOCK_MS = Math.max(5, Number(process.env.STALE_LOCK_MINUTES || 15)) * 60_000;
+const _lockSince = { management: 0, screening: 0, chat: 0 };
+let _lockWatchdog = null;
+
+function checkStaleLocks() {
+  const now = Date.now();
+  const flags = {
+    management: () => _managementBusy,
+    screening: () => _screeningBusy,
+    chat: () => busy,
+  };
+  for (const [name, get] of Object.entries(flags)) {
+    if (!get()) { _lockSince[name] = 0; continue; }
+    if (!_lockSince[name]) { _lockSince[name] = now; continue; }
+    const age = now - _lockSince[name];
+    if (age > STALE_LOCK_MS) {
+      const mins = Math.round(age / 60_000);
+      log("cron_warn", `Stale ${name} lock (${mins}m) — force-clearing so the bot keeps working`);
+      if (name === "management") _managementBusy = false;
+      else if (name === "screening") _screeningBusy = false;
+      else busy = false;
+      _lockSince[name] = 0;
+      sendMessage(`⚠️ ${name} lock was stuck for ${mins}m and was force-cleared. Check logs for a hung RPC/LLM call.`).catch(() => {});
+    }
+  }
+}
+
 function stopCronJobs() {
   for (const task of _cronTasks) task.stop();
   if (_cronTasks._pnlPollInterval) clearInterval(_cronTasks._pnlPollInterval);
@@ -877,6 +908,7 @@ Summarize the current portfolio health, total fees earned, and performance of al
     }, oppMs);
   }
 
+  if (!_lockWatchdog) _lockWatchdog = setInterval(checkStaleLocks, 30_000);
   _cronTasks = [mgmtTask, screenTask, healthTask, briefingTask, briefingWatchdog];
   // Store interval refs so stopCronJobs can clear them
   _cronTasks._pnlPollInterval = pnlPollInterval;
