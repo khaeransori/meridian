@@ -6,6 +6,7 @@ import { isBaseMintOnCooldown, isPoolOnCooldown } from "../pool-memory.js";
 import { confirmIndicatorPreset } from "./chart-indicators.js";
 import { getAgentMeridianBase, getAgentMeridianHeaders } from "./agent-meridian.js";
 import { discoverGmgnPools } from "./gmgn.js";
+import { annotateTraxr } from "./traxr.js";
 
 const DATAPI_JUP = "https://datapi.jup.ag/v1";
 
@@ -747,6 +748,9 @@ export async function getTopCandidates({ limit = 10 } = {}) {
       log("screening", `Indicator confirmation removed ${before - eligible.length} candidate(s)`);
     }
   }
+
+  // Traxr: log-only annotation (never filters, not shown to the LLM)
+  await annotateTraxr(eligible, { source }).catch((e) => log("traxr", `annotate failed: ${e.message}`));
 
   return {
     candidates: eligible,

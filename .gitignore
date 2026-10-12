@@ -49,3 +49,4 @@ discord-signals.json
 .claude/scheduled_tasks.lock
 
 .telegram-offset
+traxr-log.jsonl

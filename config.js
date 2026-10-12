@@ -252,6 +252,11 @@ export const config = {
     USDT: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
   },
 
+  // ─── Traxr (log-only pool safety scores) ──
+  traxr: {
+    mode: ["log", "off"].includes(String(u.traxrMode || "log").toLowerCase()) ? String(u.traxrMode || "log").toLowerCase() : "log",
+  },
+
   // ─── HiveMind ─────────────────────────
   hiveMind: {
     // Hardened: off by default. Set hiveMindEnabled=true in user-config to share telemetry/lessons.
