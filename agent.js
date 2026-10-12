@@ -90,11 +90,17 @@ import { getDecisionSummary } from "./decision-log.js";
 
 // Supports OpenRouter (default) or any OpenAI-compatible local server (e.g. LM Studio)
 // To use LM Studio: set LLM_BASE_URL=http://localhost:1234/v1 and LLM_API_KEY=lm-studio in .env
-const client = new OpenAI({
+// Lazy: only created when an OpenAI-compatible role actually runs, so a claude-local-only
+// setup doesn't need an OpenRouter/OpenAI key.
+let _client = null;
+function getClient() {
+  if (!_client) _client = new OpenAI({
   baseURL: process.env.LLM_BASE_URL || "https://openrouter.ai/api/v1",
   apiKey: process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY,
   timeout: 5 * 60 * 1000,
 });
+  return _client;
+}
 
 // Hardened: no implicit stealth/free model. Set LLM_MODEL or per-role models in user-config.
 const DEFAULT_MODEL = process.env.LLM_MODEL || null;
@@ -230,7 +236,7 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
             max_tokens: maxOutputTokens ?? config.llm.maxTokens,
           };
           if (!omitToolChoice) reqParams.tool_choice = toolChoice;
-          response = await client.chat.completions.create(reqParams);
+          response = await getClient().chat.completions.create(reqParams);
         } catch (error) {
           if (providerMode === "system" && isSystemRoleError(error)) {
             providerMode = "user_embedded";
