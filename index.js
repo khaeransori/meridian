@@ -51,7 +51,9 @@ if (isMain) {
   }
   log("startup", `Mode: ${process.env.DRY_RUN === "true" ? "DRY RUN" : "LIVE"}`);
   log("startup", `Model: mgmt=${config.llm.managementModel || "UNSET"} | screen=${config.llm.screeningModel || "UNSET"} | general=${config.llm.generalModel || "UNSET"}`);
-  if (!config.llm.managementModel || !config.llm.screeningModel || !config.llm.generalModel) {
+  log("startup", `LLM provider: mgmt=${config.llm.provider.management} | screen=${config.llm.provider.screening} | general=${config.llm.provider.general}${Object.values(config.llm.provider).includes("claude-local") ? ` | claude-local models: ${JSON.stringify(config.claudeLocal.models)}` : ""}`);
+  const openaiRoles = Object.entries(config.llm.provider).filter(([, v]) => v === "openai").map(([k]) => k);
+  if (openaiRoles.some((r) => !config.llm[`${r}Model`])) {
     log("startup_warn", "One or more LLM models are not configured — those cycles will fail instead of using a fallback model. Set LLM_MODEL or per-role models.");
   }
   ensureAgentId();

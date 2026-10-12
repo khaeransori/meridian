@@ -170,6 +170,24 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
   }
   const systemPrompt = buildSystemPrompt(agentType, portfolio, positions, stateSummary, lessons, perfSummary, weightsSummary, decisionSummary);
 
+  // ─── claude-local provider: run the whole cycle through the Claude CLI ───
+  const roleKey = { MANAGER: "management", SCREENER: "screening", GENERAL: "general" }[agentType] || "general";
+  if (config.llm.provider?.[roleKey] === "claude-local") {
+    const { runClaudeLocal, resolveClaudeLocalModel } = await import("./adapters/claude-local.js");
+    return runClaudeLocal({
+      goal,
+      systemPrompt,
+      sessionHistory,
+      tools: getToolsForRole(agentType, goal),
+      agentType,
+      model: resolveClaudeLocalModel(agentType, config.claudeLocal),
+      maxTurns: maxSteps,
+      onToolStart,
+      onToolFinish,
+      cfg: config.claudeLocal,
+    });
+  }
+
   let providerMode = "system";
   let messages = buildMessages(systemPrompt, sessionHistory, goal, providerMode);
 

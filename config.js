@@ -231,6 +231,38 @@ export const config = {
     managementModel: u.managementModel ?? process.env.LLM_MODEL ?? null,
     screeningModel:  u.screeningModel  ?? process.env.LLM_MODEL ?? null,
     generalModel:    u.generalModel    ?? process.env.LLM_MODEL ?? null,
+    // "openai" = OpenAI-compatible API (OpenRouter, LM Studio, ...); "claude-local" = local Claude CLI.
+    // Per role: llmProvider can be a string or { default, management, screening, general }.
+    provider: (() => {
+      const p = u.llmProvider ?? process.env.LLM_PROVIDER ?? "openai";
+      const norm = (v) => (v === "claude-local" ? "claude-local" : "openai");
+      if (p && typeof p === "object") {
+        const d = norm(p.default);
+        return { management: norm(p.management ?? d), screening: norm(p.screening ?? d), general: norm(p.general ?? d) };
+      }
+      const v = norm(p);
+      return { management: v, screening: v, general: v };
+    })(),
+  },
+
+  // ─── claude-local provider (Claude CLI + in-process MCP) ──
+  claudeLocal: {
+    command: u.claudeLocal?.command ?? "claude",
+    // Tunable per role. Aliases (haiku/sonnet/opus) or full model ids both work.
+    models: {
+      default:    u.claudeLocal?.models?.default    ?? "sonnet",
+      management: u.claudeLocal?.models?.management ?? null,
+      screening:  u.claudeLocal?.models?.screening  ?? null,
+      general:    u.claudeLocal?.models?.general    ?? null,
+    },
+    // low | medium | high | xhigh | max (null = CLI default)
+    effort: {
+      default:    u.claudeLocal?.effort?.default    ?? null,
+      management: u.claudeLocal?.effort?.management ?? null,
+      screening:  u.claudeLocal?.effort?.screening  ?? null,
+      general:    u.claudeLocal?.effort?.general    ?? null,
+    },
+    timeoutMs: u.claudeLocal?.timeoutMs ?? 240_000,
   },
 
   // ─── Darwinian Signal Weighting ───────

@@ -21,10 +21,14 @@
     "test:agent": "DRY_RUN=true node test/test-agent.js",
     "postinstall": "node scripts/patch-anchor.js",
     "test:gmgn": "DRY_RUN=true node test/test-gmgn-mock.js && DRY_RUN=true node test/test-config-gmgn.js",
-    "test:hardening": "node test/test-hardening.js"
+    "test:hardening": "node test/test-hardening.js",
+    "test:ported": "node test/test-ported.js",
+    "test:claude-local": "node test/test-claude-local.js",
+    "test:offline": "npm run test:hardening && npm run test:gmgn && npm run test:ported"
   },
   "dependencies": {
     "@meteora-ag/dlmm": "1.9.4",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "@solana/web3.js": "^1.95.0",
     "bn.js": "^5.2.1",
     "bs58": "^5.0.0",

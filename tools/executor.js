@@ -238,6 +238,10 @@ function normalizeConfigValue(key, value) {
     "managementModel",
     "screeningModel",
     "generalModel",
+    "claudeLocalModel",
+    "claudeLocalManagementModel",
+    "claudeLocalScreeningModel",
+    "claudeLocalGeneralModel",
     "hiveMindUrl",
     "hiveMindApiKey",
     "agentId",
@@ -260,6 +264,9 @@ function normalizeConfigValue(key, value) {
     gmgnInterval: ["1m", "5m", "1h", "6h", "24h"],
     gmgnDirection: ["asc", "desc"],
     gmgnIndicatorInterval: ["5_MINUTE", "15_MINUTE", "1h", "1H"],
+    claudeLocalEffort: ["low", "medium", "high", "xhigh", "max"],
+    claudeLocalScreeningEffort: ["low", "medium", "high", "xhigh", "max"],
+    claudeLocalManagementEffort: ["low", "medium", "high", "xhigh", "max"],
   };
   if (enumKeys[key]) {
     const str = coerceString(value, key);
@@ -449,6 +456,14 @@ const toolMap = {
       managementModel: ["llm", "managementModel"],
       screeningModel: ["llm", "screeningModel"],
       generalModel: ["llm", "generalModel"],
+      // claude-local provider (persisted under user-config.claudeLocal.*)
+      claudeLocalModel: ["claudeLocal", "models.default", ["claudeLocal", "models", "default"]],
+      claudeLocalManagementModel: ["claudeLocal", "models.management", ["claudeLocal", "models", "management"]],
+      claudeLocalScreeningModel: ["claudeLocal", "models.screening", ["claudeLocal", "models", "screening"]],
+      claudeLocalGeneralModel: ["claudeLocal", "models.general", ["claudeLocal", "models", "general"]],
+      claudeLocalEffort: ["claudeLocal", "effort.default", ["claudeLocal", "effort", "default"]],
+      claudeLocalScreeningEffort: ["claudeLocal", "effort.screening", ["claudeLocal", "effort", "screening"]],
+      claudeLocalManagementEffort: ["claudeLocal", "effort.management", ["claudeLocal", "effort", "management"]],
       temperature: ["llm", "temperature"],
       maxTokens: ["llm", "maxTokens"],
       maxSteps: ["llm", "maxSteps"],
