@@ -34,9 +34,9 @@ Tests (offline, mocked network): `npm run test:hardening && npm run test:gmgn`
 | OOR-frequency exit: close after N separate out-of-range events | 4 | `oorFrequencyLimit` (null = off) |
 | Volatility-spike exit: close when pool volatility > N× deploy volatility | 3× | `volatilitySpikeRatio` (null = off) |
 | Suspect PnL guard: cache-fallback close PnL is flagged and excluded from lessons, threshold evolution and signal weights | on | — |
-| Stale-lock watchdog: a stuck management/screening cycle is aborted after a timeout so the next one can run | 15 min / 20 min | `managementCycleTimeoutMs`, `screeningCycleTimeoutMs` |
-| Telegram: offset persisted across restarts; in groups only answers when @mentioned or replied to | on | `TELEGRAM_GROUP_MENTION_ONLY=false` to disable |
-| Traxr pool safety score — **log only**, never filters | on | `traxrLogEnabled`; log in `traxr-log.jsonl` |
+| Stale-lock watchdog: a management/screening/chat busy flag stuck longer than N min is force-cleared (+ Telegram alert) so the bot keeps working | 15 min | `STALE_LOCK_MINUTES` in `.env` (min 5) |
+| Telegram: offset persisted across restarts (no replayed commands); in groups only answers when @mentioned or replied to | always on | — |
+| Traxr pool safety score — **log only**, never filters; 30-min circuit breaker if the API is down | on | `traxrMode`: `log` / `off`; log in `traxr-log.jsonl` |
 | `claude-local` LLM provider (Claude CLI via your subscription) | off | see below |
 
 ### claude-local
