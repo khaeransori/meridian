@@ -3,6 +3,7 @@ import { log } from "./logger.js";
 import { repoPath } from "./repo-root.js";
 
 const USER_CONFIG_PATH = repoPath("user-config.json");
+const OFFSET_FILE = repoPath(".telegram-offset");
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || null;
 const BASE  = TOKEN ? `https://api.telegram.org/bot${TOKEN}` : null;
@@ -13,8 +14,26 @@ const ALLOWED_USER_IDS = new Set(
     .filter(Boolean)
 );
 
+// ─── offset persistence (ported from nightly-2026-04) ───────────
+// Without this, a restart re-reads unacknowledged updates and can replay
+// commands like /closeall that were already handled.
+function loadOffset() {
+  try {
+    if (fs.existsSync(OFFSET_FILE)) {
+      const n = parseInt(fs.readFileSync(OFFSET_FILE, "utf8").trim(), 10);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+  } catch { /* ignore */ }
+  return 0;
+}
+function saveOffset(n) {
+  try { fs.writeFileSync(OFFSET_FILE, String(n)); } catch { /* ignore */ }
+}
+
 let chatId = null;
-let _offset  = 0;
+let _offset  = loadOffset();
+let _botInfo = null; // { id, username } from getMe
+const REQUIRE_MENTION_IN_GROUPS = (process.env.TELEGRAM_REQUIRE_MENTION ?? "true") !== "false";
 let _polling = false;
 let _liveMessageDepth = 0;
 let _warnedMissingChatId = false;
@@ -89,6 +108,44 @@ function isAuthorizedIncomingMessage(msg) {
   }
 
   return true;
+}
+
+async function loadBotInfo() {
+  if (!BASE || _botInfo) return;
+  try {
+    const res = await fetch(`${BASE}/getMe`, { signal: AbortSignal.timeout(10_000) });
+    const data = await res.json();
+    if (data?.ok && data.result?.username) {
+      _botInfo = { id: data.result.id, username: data.result.username };
+      log("telegram", `Identified as @${_botInfo.username}`);
+    }
+  } catch (e) {
+    log("telegram_warn", `getMe failed: ${e.message}`);
+  }
+}
+
+/**
+ * Group chats: only respond when the bot is @mentioned or the message replies to the bot.
+ * Private chats always pass. Ported from nightly-2026-04. Disable with TELEGRAM_REQUIRE_MENTION=false.
+ */
+function isAddressedToBot(msg) {
+  const chatType = msg.chat?.type || "unknown";
+  if (chatType === "private" || !REQUIRE_MENTION_IN_GROUPS) return true;
+  if (!_botInfo) return false; // safer default until identity is known
+  if (msg.reply_to_message?.from?.id === _botInfo.id) return true;
+  const text = msg.text || "";
+  const handle = `@${_botInfo.username}`.toLowerCase();
+  for (const ent of msg.entities || []) {
+    if (ent.type === "mention" && text.substring(ent.offset, ent.offset + ent.length).toLowerCase() === handle) return true;
+    if (ent.type === "text_mention" && ent.user?.id === _botInfo.id) return true;
+  }
+  return text.toLowerCase().includes(handle);
+}
+
+function stripBotMention(text) {
+  if (!_botInfo || !text) return text;
+  const re = new RegExp(`@${_botInfo.username.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "gi");
+  return text.replace(re, "").replace(/\s{2,}/g, " ").trim();
 }
 
 // ─── Core send ───────────────────────────────────────────────────
@@ -377,6 +434,7 @@ async function poll(onMessage) {
       const data = await res.json();
       for (const update of data.result || []) {
         _offset = update.update_id + 1;
+        saveOffset(_offset); // persist before handling so a crash mid-command can't replay it
         const callback = update.callback_query;
         if (callback?.data && callback?.message) {
           const callbackMsg = {
@@ -397,7 +455,8 @@ async function poll(onMessage) {
         const msg = update.message;
         if (!msg?.text) continue;
         if (!isAuthorizedIncomingMessage(msg)) continue;
-        await onMessage(msg);
+        if (!isAddressedToBot(msg)) continue;
+        await onMessage({ ...msg, text: stripBotMention(msg.text) });
       }
     } catch (e) {
       if (!e.message?.includes("aborted")) {
@@ -451,7 +510,7 @@ export function startPolling(onMessage) {
     log("telegram_warn", "TELEGRAM_CHAT_ID not set in .env or user-config.telegramChatId — outbound notifications and inbound control disabled until configured.");
   }
   _polling = true;
-  poll(onMessage); // fire-and-forget
+  loadBotInfo().finally(() => poll(onMessage)); // identity first so group-mention checks work
   registerCommands();
   log("telegram", "Bot polling started");
 }
