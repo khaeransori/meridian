@@ -19,6 +19,10 @@ import { repoPath } from "../repo-root.js";
 const TRAXR_BASE = "https://solana.traxr.pro/api/traxr";
 const TIMEOUT_MS = 8_000;
 const LOG_PATH = repoPath("traxr-log.jsonl");
+// Circuit breaker: after a fully failed round, skip Traxr for a while so an outage
+// doesn't add TIMEOUT_MS to every screening cycle.
+const BREAKER_MS = 30 * 60_000;
+let _skipUntil = 0;
 
 export function isTraxrLogEnabled() {
   return String(config.traxr?.mode || "log").toLowerCase() === "log";
@@ -47,6 +51,7 @@ function num(v) {
  */
 export async function annotateTraxr(candidates, { source = "meteora" } = {}) {
   if (!isTraxrLogEnabled() || !Array.isArray(candidates) || candidates.length === 0) return;
+  if (Date.now() < _skipUntil) return;
   const results = await Promise.allSettled(candidates.map((c) => getTraxrPool(c.pool)));
   const lines = [];
   const at = new Date().toISOString();
@@ -74,6 +79,10 @@ export async function annotateTraxr(candidates, { source = "meteora" } = {}) {
       depth: c.traxr_depth,
       impact: c.traxr_impact,
     }));
+  }
+  if (lines.length === 0) {
+    _skipUntil = Date.now() + BREAKER_MS;
+    log("traxr", `No Traxr data for any candidate — pausing Traxr lookups for ${BREAKER_MS / 60_000}m`);
   }
   if (lines.length) {
     try {
